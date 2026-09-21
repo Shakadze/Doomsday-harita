@@ -37,10 +37,14 @@
         // ============================================================
         var HARITA_BOYUTU = 3072;           // harita.jpg'nin piksel boyutu
         var PARLAKLIK_ESIGI = 170;          // 0-255 arası. Bundan KOYU pikseller "sınır" sayılır ve boyama orada durur.
-                                             // Renk hiç yayılmıyorsa bu sayıyı BÜYÜT (örn 190).
-                                             // Renk komşu bölgelere taşıyorsa bu sayıyı KÜÇÜLT (örn 150).
         var BOYA_YOGUNLUGU = 0.75;          // 0-1 arası. 1 = tamamen kaplayıcı renk, 0.5 = yarı saydam.
-        var MAX_PIKSEL = 150000;            // Güvenlik limiti: bir bölge bu kadar pikselden fazla yayılırsa durur (haritanın tamamının boyanmasını önler).
+        var MAX_PIKSEL = 150000;            // Güvenlik limiti: bir bölge bu kadar pikselden fazla yayılırsa durur.
+
+        var BAYRAK_EMOJI = '🚩';            // İsimlerin yanına eklenecek küçük bayrak
+        var YAZI_MIN_BOYUT = 10;            // En küçük yazı boyutu (px). Bundan küçükse etiket hiç çizilmez.
+        var YAZI_MAX_BOYUT = 90;            // En büyük yazı boyutu (px). Çok büyük bölgelerde yazı bu boyutu geçmez.
+        var YAZI_TABAN_ORANI = 0.28;        // Bölge büyüklüğüne göre taban yazı boyutu çarpanı (ince ayar için).
+        var YAZI_GENISLIK_PAYI = 0.85;      // Yazı, bölge genişliğinin en fazla bu oranını kaplasın (taşmayı önler).
 
         var tabloLinki = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS2-GK0VTqd-f9n3oWUJFkdSV-NW2l3yXd2ZPJQOPWI3hZac7I86_V_tfGfhUYORCrLscA66gz0TRnN/pub?output=csv';
 
@@ -51,7 +55,7 @@
         var bounds = [[0, 0], [HARITA_BOYUTU, HARITA_BOYUTU]];
         map.fitBounds(bounds);
 
-        var ittifakBilgileri = [];   // index -> {ittifak, popupHtml}
+        var ittifakBilgileri = [];   // index -> {ittifak, popupHtml, toplamX, toplamY, sayim, minX, maxX, minY, maxY}
         var sahiplikHaritasi = null; // Int32Array: her piksel hangi ittifağa ait (-1 = kimseye ait değil)
 
         var baseImg = new Image();
@@ -103,8 +107,9 @@
 
         // ============================================================
         // BOYA KOVASI (flood fill) ALGORİTMASI
+        // İstatistikleri (merkez noktası + kapladığı alan) de aynı anda topluyor
         // ============================================================
-        function bolgeyiDoldur(pixels, sahiplik, boyut, baslangicX, baslangicY, rgb, sahipIndex) {
+        function bolgeyiDoldur(pixels, sahiplik, boyut, baslangicX, baslangicY, rgb, sahipIndex, istatistik) {
             var ziyaretEdildi = new Uint8Array(boyut * boyut);
             var yigin = [[baslangicX, baslangicY]];
             var sayac = 0;
@@ -131,6 +136,15 @@
                 sahiplik[idx1D] = sahipIndex;
                 sayac++;
 
+                // istatistik topla (etiketi doğru yere ve doğru boyutta koymak için)
+                istatistik.toplamX += px;
+                istatistik.toplamY += py;
+                istatistik.sayim += 1;
+                if (px < istatistik.minX) istatistik.minX = px;
+                if (px > istatistik.maxX) istatistik.maxX = px;
+                if (py < istatistik.minY) istatistik.minY = py;
+                if (py > istatistik.maxY) istatistik.maxY = py;
+
                 yigin.push([px + 1, py]);
                 yigin.push([px - 1, py]);
                 yigin.push([px, py + 1]);
@@ -143,7 +157,46 @@
         }
 
         // ============================================================
-        // ANA İŞLEM: resmi canvas'a çiz, her ittifak için bölgeyi boya
+        // ETİKET ÇİZİMİ: bölgenin ortasına, boyutuna göre ölçeklenen yazı + bayrak
+        // ============================================================
+        function etiketCiz(ctx, ittifak, istatistik) {
+            if (istatistik.sayim <= 0) return;
+
+            var merkezX = istatistik.toplamX / istatistik.sayim;
+            var merkezY = istatistik.toplamY / istatistik.sayim;
+            var genislik = istatistik.maxX - istatistik.minX;
+            var alan = istatistik.sayim;
+
+            var yaziMetni = BAYRAK_EMOJI + ' ' + ittifak;
+
+            // Alan büyüklüğüne göre taban yazı boyutu
+            var boyut = Math.sqrt(alan) * YAZI_TABAN_ORANI;
+
+            // Yazının genişliğini ölç, bölgeye sığmıyorsa küçült
+            ctx.font = boyut + 'px Arial';
+            var olculenGenislik = ctx.measureText(yaziMetni).width;
+            var izinliGenislik = genislik * YAZI_GENISLIK_PAYI;
+            if (olculenGenislik > izinliGenislik && olculenGenislik > 0) {
+                boyut = boyut * (izinliGenislik / olculenGenislik);
+            }
+
+            boyut = Math.max(YAZI_MIN_BOYUT, Math.min(YAZI_MAX_BOYUT, boyut));
+            if (boyut < YAZI_MIN_BOYUT + 0.5) return; // çok küçükse hiç yazma, kalabalık etmesin
+
+            ctx.save();
+            ctx.font = 'bold ' + boyut + 'px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.lineWidth = Math.max(2, boyut * 0.12);
+            ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+            ctx.fillStyle = '#ffffff';
+            ctx.strokeText(yaziMetni, merkezX, merkezY);
+            ctx.fillText(yaziMetni, merkezX, merkezY);
+            ctx.restore();
+        }
+
+        // ============================================================
+        // ANA İŞLEM: resmi canvas'a çiz, her ittifak için bölgeyi boya + etiket ekle
         // ============================================================
         function haritayiOlustur() {
             var canvas = document.createElement('canvas');
@@ -186,7 +239,12 @@
                 var rgb = hexToRgb(renk);
                 var sahipIndex = ittifakBilgileri.length;
 
-                bolgeyiDoldur(pixels, sahiplikHaritasi, HARITA_BOYUTU, x, y, rgb, sahipIndex);
+                var istatistik = {
+                    toplamX: 0, toplamY: 0, sayim: 0,
+                    minX: HARITA_BOYUTU, maxX: 0, minY: HARITA_BOYUTU, maxY: 0
+                };
+
+                bolgeyiDoldur(pixels, sahiplikHaritasi, HARITA_BOYUTU, x, y, rgb, sahipIndex, istatistik);
 
                 // --- Popup içeriği (tıklayınca çıkacak bilgi kartı) ---
                 var oyuncuDetay = '';
@@ -211,17 +269,24 @@
 
                 var popupHtml = `
                     <div style="font-family: sans-serif; min-width: 200px;">
-                        <h3 style="margin:0 0 6px 0; border-bottom:2px solid ${renk}; padding-bottom:4px; color:#2c3e50;">${ittifak}</h3>
+                        <h3 style="margin:0 0 6px 0; border-bottom:2px solid ${renk}; padding-bottom:4px; color:#2c3e50;">${BAYRAK_EMOJI} ${ittifak}</h3>
                         ${fraksiyon ? `<b>🏳️ Fraksiyon/Eyalet:</b> ${fraksiyon}<br>` : ''}
                         ${bolge ? `<b>📍 Bölge:</b> ${bolge}<br>` : ''}
                         ${oyuncuDetay ? `<div style="margin-top:8px; font-size:12px; background:#f4f6f7; padding:6px; border-radius:4px;">${oyuncuDetay}</div>` : ''}
                     </div>
                 `;
 
-                ittifakBilgileri.push({ ittifak: ittifak, popupHtml: popupHtml });
+                ittifakBilgileri.push({ ittifak: ittifak, popupHtml: popupHtml, istatistik: istatistik });
             });
 
+            // Boyanan pikselleri canvas'a geri yaz
             ctx.putImageData(imgData, 0, 0);
+
+            // Şimdi her bölgenin üstüne, boyutuna göre ölçeklenen isim + bayrak etiketini çiz
+            ittifakBilgileri.forEach(function(bilgi) {
+                etiketCiz(ctx, bilgi.ittifak, bilgi.istatistik);
+            });
+
             var sonGorsel = canvas.toDataURL('image/png');
             L.imageOverlay(sonGorsel, bounds).addTo(map);
 
