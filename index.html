@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Doomsday Savaş Odası Haritası</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background-color: #1a1a1a; font-family: Arial, sans-serif; }
+        #map { width: 100vw; height: 100vh; }
+        .custom-tooltip { background: rgba(0,0,0,0.85); color: #fff; border: none; font-weight: bold; padding: 4px 8px; border-radius: 4px; }
+        .info-panel {
+            position: absolute; top: 10px; right: 10px; z-index: 1000;
+            background: rgba(255, 255, 255, 0.95); padding: 12px 16px; border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3); font-size: 13px; max-width: 260px;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="info-panel">
+        <h4 style="margin: 0 0 6px 0;">📍 Doomsday Savaş Odası</h4>
+        <span>Haritada tıklayarak doğru <b>X, Y</b> (oyun koordinatı) alabilirsiniz.<br><b>F12 -> Console</b> kısmından veri durumunu takip edin.</span>
+    </div>
+
+    <script>
+        // Harita boyutu (harita.jpg'nin gerçek piksel boyutu ile aynı olmalı!)
+        var HARITA_BOYUTU = 3072;
+
+        // Harita Sınırları ve Ölçeklendirme
+        var map = L.map('map', { crs: L.CRS.Simple, minZoom: -3, maxZoom: 3 });
+        var bounds = [[0, 0], [HARITA_BOYUTU, HARITA_BOYUTU]];
+
+        L.imageOverlay('harita.jpg', bounds).addTo(map);
+        map.fitBounds(bounds);
+
+        // --- ÖNEMLİ NOT ---
+        // Leaflet'te CRS.Simple kullanıldığında, bounds'un üst kısmı (lat = HARITA_BOYUTU)
+        // görselin ÜST kenarına değil, Leaflet mantığında "yukarı" (kuzey) olarak çizilir.
+        // Ama oyun içi X/Y koordinat sistemleri genelde resim/piksel mantığıyla çalışır:
+        // Y=0 haritanın ÜSTÜ, Y arttıkça AŞAĞI iner.
+        // Bu yüzden oyun koordinatını Leaflet koordinatına çevirirken Y eksenini ÇEVİRMEMİZ gerekiyor:
+        //   leaflet_lat = HARITA_BOYUTU - oyun_Y
+        //   leaflet_lng = oyun_X
+        // Aşağıdaki fonksiyon bu dönüşümü yapıyor. Eğer haritan yine ters görünürse
+        // (yani üst-alt karışmışsa), bu fonksiyonu "return [y, x];" yaparak deneyebilirsin.
+        function oyunKoordUlaftLeaflet(x, y) {
+            return [HARITA_BOYUTU - y, x];
+        }
+
+        var tabloLinki = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS2-GK0VTqd-f9n3oWUJFkdSV-NW2l3yXd2ZPJQOPWI3hZac7I86_V_tfGfhUYORCrLscA66gz0TRnN/pub?output=csv';
+
+        Papa.parse(tabloLinki, {
+            download: true,
+            header: true,
+            skipEmptyLines: true,
+            complete: function(results) {
+                console.log("Tablodan Çekilen Ham Veri:", results.data);
+
+                results.data.forEach(function(satir, index) {
+                    function getVal(keys) {
+                        for (var k of keys) {
+                            for (var col in satir) {
+                                if (col.trim().toLowerCase() === k.toLowerCase()) {
+                                    return satir[col] ? satir[col].trim() : '';
+                                }
+                            }
+                        }
+                        return '';
+                    }
+
+                    var ittifak = getVal(['Ittifak', 'Alliance', 'Tag', 'İttifak', 'BYC']);
+                    var xVal = getVal(['X', 'Pos_X', 'X_Kordinat']);
+                    var yVal = getVal(['Y', 'Pos_Y', 'Y_Kordinat']);
+                    var renk = getVal(['Renk', 'Color']) || '#e74c3c';
+                    var fraksiyon = getVal(['Fraksiyon', 'Server', 'Eyalet']);
+                    var bolge = getVal(['Bolge', 'Region', 'Bölge', 'Kordinat_Kodu']);
+                    var alanCapi = getVal(['Alan_Capi', 'Cap', 'Radius']);
+
+                    console.log(`Satır ${index}: İttifak=${ittifak}, X=${xVal}, Y=${yVal}`);
+
+                    if (!ittifak || !xVal || !yVal) return;
+
+                    var x = parseFloat(xVal);
+                    var y = parseFloat(yVal);
+                    if (isNaN(x) || isNaN(y)) return;
+
+                    // Oyun koordinatını (piksel mantığı, Y aşağı doğru artar) Leaflet koordinatına çeviriyoruz
+                    var haritaKoordinati = oyunKoordUlaftLeaflet(x, y);
+
+                    if (alanCapi && !isNaN(parseFloat(alanCapi))) {
+                        L.circle(haritaKoordinati, {
+                            color: renk,
+                            fillColor: renk,
+                            fillOpacity: 0.3,
+                            radius: parseFloat(alanCapi),
+                            weight: 2
+                        }).addTo(map);
+                    }
+
+                    var icon = L.divIcon({
+                        className: 'custom-div-icon',
+                        html: `<div style='background-color:${renk}; width: 26px; height: 26px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 8px rgba(0,0,0,0.9);'></div>`,
+                        iconSize: [30, 30]
+                    });
+
+                    var marker = L.marker(haritaKoordinati, {icon: icon}).addTo(map);
+
+                    var oyuncuDetay = '';
+                    var p1Ad = getVal(['Oyuncu1_Ad', 'En_Guclu_1', 'Highest Might']);
+                    var p1Genel = getVal(['Oyuncu1_GenelGuc', 'Oyuncu1_Genel']);
+                    var p1Gercek = getVal(['Oyuncu1_GercekGuc', 'Oyuncu1_Gercek']);
+
+                    if (p1Ad || p1Genel || p1Gercek) {
+                        oyuncuDetay += `<b>1. ${p1Ad || 'Oyuncu'}</b><br>`;
+                        if (p1Genel) oyuncuDetay += `&nbsp;&nbsp;🛡️ Genel: <b>${p1Genel}</b> `;
+                        if (p1Gercek) oyuncuDetay += `⚔️ Gerçek: <b>${p1Gercek}</b>`;
+                        oyuncuDetay += `<br>`;
+                    }
+
+                    var p2Ad = getVal(['Oyuncu2_Ad', 'En_Guclu_2']);
+                    var p2Genel = getVal(['Oyuncu2_GenelGuc', 'Oyuncu2_Genel']);
+                    var p2Gercek = getVal(['Oyuncu2_GercekGuc', 'Oyuncu2_Gercek']);
+
+                    if (p2Ad || p2Genel || p2Gercek) {
+                        oyuncuDetay += `<div style="margin-top:4px; border-top:1px solid #ddd; padding-top:4px;"><b>2. ${p2Ad || 'Oyuncu'}</b><br>`;
+                        if (p2Genel) oyuncuDetay += `&nbsp;&nbsp;🛡️ Genel: <b>${p2Genel}</b> `;
+                        if (p2Gercek) oyuncuDetay += `⚔️ Gerçek: <b>${p2Gercek}</b>`;
+                        oyuncuDetay += `</div>`;
+                    }
+
+                    var popupHtml = `
+                        <div style="font-family: sans-serif; min-width: 200px;">
+                            <h3 style="margin:0 0 6px 0; border-bottom:2px solid ${renk}; padding-bottom:4px; color:#2c3e50;">${ittifak}</h3>
+                            ${fraksiyon ? `<b>🏳️ Fraksiyon/Eyalet:</b> ${fraksiyon}<br>` : ''}
+                            ${bolge ? `<b>📍 Bölge:</b> ${bolge}<br>` : ''}
+                            ${oyuncuDetay ? `<div style="margin-top:8px; font-size:12px; background:#f4f6f7; padding:6px; border-radius:4px;">${oyuncuDetay}</div>` : ''}
+                        </div>
+                    `;
+
+                    marker.bindPopup(popupHtml);
+                    // 40 ittifak olduğu için isimler kalıcı gösterilirse harita çok kalabalık olur.
+                    // Şimdilik sadece mouse üzerine gelince (hover) gösteriliyor.
+                    // Kalıcı görünmesini istersen: {permanent: true, ...}
+                    marker.bindTooltip(ittifak, {permanent: false, direction: "top", className: "custom-tooltip", offset: [0, -15]});
+                });
+            },
+            error: function(err) {
+                console.error("CSV okunamadı:", err);
+                alert("Google Sheets tablosu okunamadı. Linkin 'Publish to web -> CSV' olarak paylaşıldığından emin ol.");
+            }
+        });
+
+        // Haritaya tıklayınca OYUN koordinatını (X,Y) veren fonksiyon.
+        // Kalibrasyon için: haritada bildiğin bir noktaya (ör. bir Trade Station) tıkla,
+        // oyunda o noktanın gerçek X,Y'sini biliyorsan karşılaştır.
+        map.on('click', function(e) {
+            var clickedX = Math.round(e.latlng.lng);
+            var clickedY = Math.round(HARITA_BOYUTU - e.latlng.lat);
+            console.log("Tıklanan Koordinat -> X:", clickedX, "Y:", clickedY);
+            alert("Oyun Koordinatı:\nX (Yatay): " + clickedX + "\nY (Dikey): " + clickedY);
+        });
+    </script>
+</body>
+</html>
