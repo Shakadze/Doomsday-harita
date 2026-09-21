@@ -10,47 +10,69 @@
     <style>
         body { margin: 0; padding: 0; background-color: #1a1a1a; font-family: Arial, sans-serif; }
         #map { width: 100vw; height: 100vh; }
-        .custom-tooltip { background: rgba(0,0,0,0.85); color: #fff; border: none; font-weight: bold; padding: 4px 8px; border-radius: 4px; }
         .info-panel {
             position: absolute; top: 10px; right: 10px; z-index: 1000;
             background: rgba(255, 255, 255, 0.95); padding: 12px 16px; border-radius: 8px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.3); font-size: 13px; max-width: 260px;
         }
+        #yukleniyor {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #1a1a1a; color: #fff; z-index: 2000;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 18px; text-align: center;
+        }
     </style>
 </head>
 <body>
     <div id="map"></div>
+    <div id="yukleniyor">Harita hazırlanıyor, bölgeler boyanıyor...<br>(biraz sürebilir)</div>
     <div class="info-panel">
         <h4 style="margin: 0 0 6px 0;">📍 Doomsday Savaş Odası</h4>
-        <span>Haritada tıklayarak doğru <b>X, Y</b> (oyun koordinatı) alabilirsiniz.<br><b>F12 -> Console</b> kısmından veri durumunu takip edin.</span>
+        <span>Renkli bir bölgeye tıklayarak ittifak bilgisini görebilirsiniz.<br>Boş bir yere tıklarsan o noktanın <b>X, Y</b> koordinatı konsola yazılır.<br><b>F12 -> Console</b>'dan durumu takip edin.</span>
     </div>
 
     <script>
-        // Harita boyutu (harita.jpg'nin gerçek piksel boyutu ile aynı olmalı!)
-        var HARITA_BOYUTU = 3072;
-
-        // Harita Sınırları ve Ölçeklendirme
-        var map = L.map('map', { crs: L.CRS.Simple, minZoom: -3, maxZoom: 3 });
-        var bounds = [[0, 0], [HARITA_BOYUTU, HARITA_BOYUTU]];
-
-        L.imageOverlay('harita.jpg', bounds).addTo(map);
-        map.fitBounds(bounds);
-
-        // --- ÖNEMLİ NOT ---
-        // Leaflet'te CRS.Simple kullanıldığında, bounds'un üst kısmı (lat = HARITA_BOYUTU)
-        // görselin ÜST kenarına değil, Leaflet mantığında "yukarı" (kuzey) olarak çizilir.
-        // Ama oyun içi X/Y koordinat sistemleri genelde resim/piksel mantığıyla çalışır:
-        // Y=0 haritanın ÜSTÜ, Y arttıkça AŞAĞI iner.
-        // Bu yüzden oyun koordinatını Leaflet koordinatına çevirirken Y eksenini ÇEVİRMEMİZ gerekiyor:
-        //   leaflet_lat = HARITA_BOYUTU - oyun_Y
-        //   leaflet_lng = oyun_X
-        // Aşağıdaki fonksiyon bu dönüşümü yapıyor. Eğer haritan yine ters görünürse
-        // (yani üst-alt karışmışsa), bu fonksiyonu "return [y, x];" yaparak deneyebilirsin.
-        function oyunKoordUlaftLeaflet(x, y) {
-            return [HARITA_BOYUTU - y, x];
-        }
+        // ============================================================
+        // AYARLAR
+        // ============================================================
+        var HARITA_BOYUTU = 3072;           // harita.jpg'nin piksel boyutu
+        var PARLAKLIK_ESIGI = 170;          // 0-255 arası. Bundan KOYU pikseller "sınır" sayılır ve boyama orada durur.
+                                             // Renk hiç yayılmıyorsa bu sayıyı BÜYÜT (örn 190).
+                                             // Renk komşu bölgelere taşıyorsa bu sayıyı KÜÇÜLT (örn 150).
+        var BOYA_YOGUNLUGU = 0.75;          // 0-1 arası. 1 = tamamen kaplayıcı renk, 0.5 = yarı saydam.
+        var MAX_PIKSEL = 150000;            // Güvenlik limiti: bir bölge bu kadar pikselden fazla yayılırsa durur (haritanın tamamının boyanmasını önler).
 
         var tabloLinki = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS2-GK0VTqd-f9n3oWUJFkdSV-NW2l3yXd2ZPJQOPWI3hZac7I86_V_tfGfhUYORCrLscA66gz0TRnN/pub?output=csv';
+
+        // ============================================================
+        // HARİTA KURULUMU
+        // ============================================================
+        var map = L.map('map', { crs: L.CRS.Simple, minZoom: -3, maxZoom: 3 });
+        var bounds = [[0, 0], [HARITA_BOYUTU, HARITA_BOYUTU]];
+        map.fitBounds(bounds);
+
+        var ittifakBilgileri = [];   // index -> {ittifak, popupHtml}
+        var sahiplikHaritasi = null; // Int32Array: her piksel hangi ittifağa ait (-1 = kimseye ait değil)
+
+        var baseImg = new Image();
+        var csvData = null;
+
+        function ikisiDeHazirMi() {
+            return baseImg.complete && baseImg.naturalWidth > 0 && csvData !== null;
+        }
+
+        var baslatildi = false;
+        function denemeBasla() {
+            if (baslatildi || !ikisiDeHazirMi()) return;
+            baslatildi = true;
+            haritayiOlustur();
+        }
+
+        baseImg.onload = denemeBasla;
+        baseImg.onerror = function() {
+            alert('harita.jpg dosyası bulunamadı! index.html ile aynı klasörde olduğundan emin ol.');
+        };
+        baseImg.src = 'harita.jpg';
 
         Papa.parse(tabloLinki, {
             download: true,
@@ -58,94 +80,8 @@
             skipEmptyLines: true,
             complete: function(results) {
                 console.log("Tablodan Çekilen Ham Veri:", results.data);
-
-                results.data.forEach(function(satir, index) {
-                    function getVal(keys) {
-                        for (var k of keys) {
-                            for (var col in satir) {
-                                if (col.trim().toLowerCase() === k.toLowerCase()) {
-                                    return satir[col] ? satir[col].trim() : '';
-                                }
-                            }
-                        }
-                        return '';
-                    }
-
-                    var ittifak = getVal(['Ittifak', 'Alliance', 'Tag', 'İttifak', 'BYC']);
-                    var xVal = getVal(['X', 'Pos_X', 'X_Kordinat']);
-                    var yVal = getVal(['Y', 'Pos_Y', 'Y_Kordinat']);
-                    var renk = getVal(['Renk', 'Color']) || '#e74c3c';
-                    var fraksiyon = getVal(['Fraksiyon', 'Server', 'Eyalet']);
-                    var bolge = getVal(['Bolge', 'Region', 'Bölge', 'Kordinat_Kodu']);
-                    var alanCapi = getVal(['Alan_Capi', 'Cap', 'Radius']);
-
-                    console.log(`Satır ${index}: İttifak=${ittifak}, X=${xVal}, Y=${yVal}`);
-
-                    if (!ittifak || !xVal || !yVal) return;
-
-                    var x = parseFloat(xVal);
-                    var y = parseFloat(yVal);
-                    if (isNaN(x) || isNaN(y)) return;
-
-                    // Oyun koordinatını (piksel mantığı, Y aşağı doğru artar) Leaflet koordinatına çeviriyoruz
-                    var haritaKoordinati = oyunKoordUlaftLeaflet(x, y);
-
-                    if (alanCapi && !isNaN(parseFloat(alanCapi))) {
-                        L.circle(haritaKoordinati, {
-                            color: renk,
-                            fillColor: renk,
-                            fillOpacity: 0.3,
-                            radius: parseFloat(alanCapi),
-                            weight: 2
-                        }).addTo(map);
-                    }
-
-                    var icon = L.divIcon({
-                        className: 'custom-div-icon',
-                        html: `<div style='background-color:${renk}; width: 26px; height: 26px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 8px rgba(0,0,0,0.9);'></div>`,
-                        iconSize: [30, 30]
-                    });
-
-                    var marker = L.marker(haritaKoordinati, {icon: icon}).addTo(map);
-
-                    var oyuncuDetay = '';
-                    var p1Ad = getVal(['Oyuncu1_Ad', 'En_Guclu_1', 'Highest Might']);
-                    var p1Genel = getVal(['Oyuncu1_GenelGuc', 'Oyuncu1_Genel']);
-                    var p1Gercek = getVal(['Oyuncu1_GercekGuc', 'Oyuncu1_Gercek']);
-
-                    if (p1Ad || p1Genel || p1Gercek) {
-                        oyuncuDetay += `<b>1. ${p1Ad || 'Oyuncu'}</b><br>`;
-                        if (p1Genel) oyuncuDetay += `&nbsp;&nbsp;🛡️ Genel: <b>${p1Genel}</b> `;
-                        if (p1Gercek) oyuncuDetay += `⚔️ Gerçek: <b>${p1Gercek}</b>`;
-                        oyuncuDetay += `<br>`;
-                    }
-
-                    var p2Ad = getVal(['Oyuncu2_Ad', 'En_Guclu_2']);
-                    var p2Genel = getVal(['Oyuncu2_GenelGuc', 'Oyuncu2_Genel']);
-                    var p2Gercek = getVal(['Oyuncu2_GercekGuc', 'Oyuncu2_Gercek']);
-
-                    if (p2Ad || p2Genel || p2Gercek) {
-                        oyuncuDetay += `<div style="margin-top:4px; border-top:1px solid #ddd; padding-top:4px;"><b>2. ${p2Ad || 'Oyuncu'}</b><br>`;
-                        if (p2Genel) oyuncuDetay += `&nbsp;&nbsp;🛡️ Genel: <b>${p2Genel}</b> `;
-                        if (p2Gercek) oyuncuDetay += `⚔️ Gerçek: <b>${p2Gercek}</b>`;
-                        oyuncuDetay += `</div>`;
-                    }
-
-                    var popupHtml = `
-                        <div style="font-family: sans-serif; min-width: 200px;">
-                            <h3 style="margin:0 0 6px 0; border-bottom:2px solid ${renk}; padding-bottom:4px; color:#2c3e50;">${ittifak}</h3>
-                            ${fraksiyon ? `<b>🏳️ Fraksiyon/Eyalet:</b> ${fraksiyon}<br>` : ''}
-                            ${bolge ? `<b>📍 Bölge:</b> ${bolge}<br>` : ''}
-                            ${oyuncuDetay ? `<div style="margin-top:8px; font-size:12px; background:#f4f6f7; padding:6px; border-radius:4px;">${oyuncuDetay}</div>` : ''}
-                        </div>
-                    `;
-
-                    marker.bindPopup(popupHtml);
-                    // 40 ittifak olduğu için isimler kalıcı gösterilirse harita çok kalabalık olur.
-                    // Şimdilik sadece mouse üzerine gelince (hover) gösteriliyor.
-                    // Kalıcı görünmesini istersen: {permanent: true, ...}
-                    marker.bindTooltip(ittifak, {permanent: false, direction: "top", className: "custom-tooltip", offset: [0, -15]});
-                });
+                csvData = results.data;
+                denemeBasla();
             },
             error: function(err) {
                 console.error("CSV okunamadı:", err);
@@ -153,14 +89,168 @@
             }
         });
 
-        // Haritaya tıklayınca OYUN koordinatını (X,Y) veren fonksiyon.
-        // Kalibrasyon için: haritada bildiğin bir noktaya (ör. bir Trade Station) tıkla,
-        // oyunda o noktanın gerçek X,Y'sini biliyorsan karşılaştır.
+        // ============================================================
+        // RENK ÇÖZÜMLEME (hex ya da renk ismi -> {r,g,b})
+        // ============================================================
+        function hexToRgb(renk) {
+            var tmp = document.createElement('canvas').getContext('2d');
+            tmp.fillStyle = '#000';
+            try { tmp.fillStyle = renk; } catch (e) {}
+            tmp.fillRect(0, 0, 1, 1);
+            var veri = tmp.getImageData(0, 0, 1, 1).data;
+            return { r: veri[0], g: veri[1], b: veri[2] };
+        }
+
+        // ============================================================
+        // BOYA KOVASI (flood fill) ALGORİTMASI
+        // ============================================================
+        function bolgeyiDoldur(pixels, sahiplik, boyut, baslangicX, baslangicY, rgb, sahipIndex) {
+            var ziyaretEdildi = new Uint8Array(boyut * boyut);
+            var yigin = [[baslangicX, baslangicY]];
+            var sayac = 0;
+
+            while (yigin.length > 0 && sayac < MAX_PIKSEL) {
+                var nokta = yigin.pop();
+                var px = nokta[0], py = nokta[1];
+
+                if (px < 0 || px >= boyut || py < 0 || py >= boyut) continue;
+                var idx1D = py * boyut + px;
+                if (ziyaretEdildi[idx1D]) continue;
+                ziyaretEdildi[idx1D] = 1;
+
+                if (sahiplik[idx1D] !== -1) continue; // başka bir ittifağa ait, dur
+
+                var idxPixel = idx1D * 4;
+                var r = pixels[idxPixel], g = pixels[idxPixel + 1], b = pixels[idxPixel + 2];
+                var parlaklik = (r + g + b) / 3;
+                if (parlaklik < PARLAKLIK_ESIGI) continue; // koyu/sınır çizgisi, dur
+
+                pixels[idxPixel]     = Math.round(r * (1 - BOYA_YOGUNLUGU) + rgb.r * BOYA_YOGUNLUGU);
+                pixels[idxPixel + 1] = Math.round(g * (1 - BOYA_YOGUNLUGU) + rgb.g * BOYA_YOGUNLUGU);
+                pixels[idxPixel + 2] = Math.round(b * (1 - BOYA_YOGUNLUGU) + rgb.b * BOYA_YOGUNLUGU);
+                sahiplik[idx1D] = sahipIndex;
+                sayac++;
+
+                yigin.push([px + 1, py]);
+                yigin.push([px - 1, py]);
+                yigin.push([px, py + 1]);
+                yigin.push([px, py - 1]);
+            }
+
+            if (sayac >= MAX_PIKSEL) {
+                console.warn("UYARI: (" + baslangicX + "," + baslangicY + ") noktasındaki boyama güvenlik limitine ulaştı (" + MAX_PIKSEL + " piksel). PARLAKLIK_ESIGI değerini küçültmeyi dene.");
+            }
+        }
+
+        // ============================================================
+        // ANA İŞLEM: resmi canvas'a çiz, her ittifak için bölgeyi boya
+        // ============================================================
+        function haritayiOlustur() {
+            var canvas = document.createElement('canvas');
+            canvas.width = HARITA_BOYUTU;
+            canvas.height = HARITA_BOYUTU;
+            var ctx = canvas.getContext('2d');
+            ctx.drawImage(baseImg, 0, 0, HARITA_BOYUTU, HARITA_BOYUTU);
+
+            var imgData = ctx.getImageData(0, 0, HARITA_BOYUTU, HARITA_BOYUTU);
+            var pixels = imgData.data;
+
+            sahiplikHaritasi = new Int32Array(HARITA_BOYUTU * HARITA_BOYUTU).fill(-1);
+
+            csvData.forEach(function(satir, index) {
+                function getVal(keys) {
+                    for (var k of keys) {
+                        for (var col in satir) {
+                            if (col.trim().toLowerCase() === k.toLowerCase()) {
+                                return satir[col] ? satir[col].trim() : '';
+                            }
+                        }
+                    }
+                    return '';
+                }
+
+                var ittifak = getVal(['Ittifak', 'Alliance', 'Tag', 'İttifak']);
+                var xVal = getVal(['X', 'Pos_X', 'X_Kordinat']);
+                var yVal = getVal(['Y', 'Pos_Y', 'Y_Kordinat']);
+                var renk = getVal(['Renk', 'Color']) || '#e74c3c';
+                var fraksiyon = getVal(['Fraksiyon', 'Server', 'Eyalet']);
+                var bolge = getVal(['Bolge', 'Region', 'Bölge', 'Kordinat_Kodu']);
+
+                if (!ittifak || !xVal || !yVal) return;
+
+                var x = Math.round(parseFloat(xVal));
+                var y = Math.round(parseFloat(yVal));
+                if (isNaN(x) || isNaN(y)) return;
+                if (x < 0 || x >= HARITA_BOYUTU || y < 0 || y >= HARITA_BOYUTU) return;
+
+                var rgb = hexToRgb(renk);
+                var sahipIndex = ittifakBilgileri.length;
+
+                bolgeyiDoldur(pixels, sahiplikHaritasi, HARITA_BOYUTU, x, y, rgb, sahipIndex);
+
+                // --- Popup içeriği (tıklayınca çıkacak bilgi kartı) ---
+                var oyuncuDetay = '';
+                var p1Ad = getVal(['Oyuncu1_Ad', 'En_Guclu_1', 'Highest Might']);
+                var p1Genel = getVal(['Oyuncu1_GenelGuc', 'Oyuncu1_Genel']);
+                var p1Gercek = getVal(['Oyuncu1_GercekGuc', 'Oyuncu1_Gercek']);
+                if (p1Ad || p1Genel || p1Gercek) {
+                    oyuncuDetay += `<b>1. ${p1Ad || 'Oyuncu'}</b><br>`;
+                    if (p1Genel) oyuncuDetay += `&nbsp;&nbsp;🛡️ Genel: <b>${p1Genel}</b> `;
+                    if (p1Gercek) oyuncuDetay += `⚔️ Gerçek: <b>${p1Gercek}</b>`;
+                    oyuncuDetay += `<br>`;
+                }
+                var p2Ad = getVal(['Oyuncu2_Ad', 'En_Guclu_2']);
+                var p2Genel = getVal(['Oyuncu2_GenelGuc', 'Oyuncu2_Genel']);
+                var p2Gercek = getVal(['Oyuncu2_GercekGuc', 'Oyuncu2_Gercek']);
+                if (p2Ad || p2Genel || p2Gercek) {
+                    oyuncuDetay += `<div style="margin-top:4px; border-top:1px solid #ddd; padding-top:4px;"><b>2. ${p2Ad || 'Oyuncu'}</b><br>`;
+                    if (p2Genel) oyuncuDetay += `&nbsp;&nbsp;🛡️ Genel: <b>${p2Genel}</b> `;
+                    if (p2Gercek) oyuncuDetay += `⚔️ Gerçek: <b>${p2Gercek}</b>`;
+                    oyuncuDetay += `</div>`;
+                }
+
+                var popupHtml = `
+                    <div style="font-family: sans-serif; min-width: 200px;">
+                        <h3 style="margin:0 0 6px 0; border-bottom:2px solid ${renk}; padding-bottom:4px; color:#2c3e50;">${ittifak}</h3>
+                        ${fraksiyon ? `<b>🏳️ Fraksiyon/Eyalet:</b> ${fraksiyon}<br>` : ''}
+                        ${bolge ? `<b>📍 Bölge:</b> ${bolge}<br>` : ''}
+                        ${oyuncuDetay ? `<div style="margin-top:8px; font-size:12px; background:#f4f6f7; padding:6px; border-radius:4px;">${oyuncuDetay}</div>` : ''}
+                    </div>
+                `;
+
+                ittifakBilgileri.push({ ittifak: ittifak, popupHtml: popupHtml });
+            });
+
+            ctx.putImageData(imgData, 0, 0);
+            var sonGorsel = canvas.toDataURL('image/png');
+            L.imageOverlay(sonGorsel, bounds).addTo(map);
+
+            document.getElementById('yukleniyor').style.display = 'none';
+        }
+
+        // ============================================================
+        // TIKLAMA: renkli bölgeye tıklarsan bilgi, boş yere tıklarsan koordinat
+        // ============================================================
         map.on('click', function(e) {
-            var clickedX = Math.round(e.latlng.lng);
-            var clickedY = Math.round(HARITA_BOYUTU - e.latlng.lat);
-            console.log("Tıklanan Koordinat -> X:", clickedX, "Y:", clickedY);
-            alert("Oyun Koordinatı:\nX (Yatay): " + clickedX + "\nY (Dikey): " + clickedY);
+            var tiklananX = Math.round(e.latlng.lng);
+            var tiklananY = Math.round(HARITA_BOYUTU - e.latlng.lat);
+
+            if (!sahiplikHaritasi || tiklananX < 0 || tiklananX >= HARITA_BOYUTU || tiklananY < 0 || tiklananY >= HARITA_BOYUTU) {
+                return;
+            }
+
+            var idx1D = tiklananY * HARITA_BOYUTU + tiklananX;
+            var sahipIndex = sahiplikHaritasi[idx1D];
+
+            if (sahipIndex !== -1 && ittifakBilgileri[sahipIndex]) {
+                L.popup()
+                    .setLatLng(e.latlng)
+                    .setContent(ittifakBilgileri[sahipIndex].popupHtml)
+                    .openOn(map);
+            } else {
+                console.log("Boş nokta -> X:", tiklananX, "Y:", tiklananY);
+                alert("Boş Nokta Koordinatı:\nX: " + tiklananX + "\nY: " + tiklananY);
+            }
         });
     </script>
 </body>
