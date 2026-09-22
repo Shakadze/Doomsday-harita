@@ -35,16 +35,11 @@
         // ============================================================
         // AYARLAR
         // ============================================================
-        var HARITA_BOYUTU = 3072;           // harita.jpg'nin piksel boyutu
-        var PARLAKLIK_ESIGI = 170;          // 0-255 arası. Bundan KOYU pikseller "sınır" sayılır ve boyama orada durur.
-        var BOYA_YOGUNLUGU = 0.75;          // 0-1 arası. 1 = tamamen kaplayıcı renk, 0.5 = yarı saydam.
-        var MAX_PIKSEL = 150000;            // Güvenlik limiti: bir bölge bu kadar pikselden fazla yayılırsa durur.
-
-        // YENİ: sızıntı önleme ayarı
-        var SINIR_GENISLETME = 1;           // Sınır çizgilerini bu kadar piksel kalınlaştır (küçük kopuklukları kapatır).
-                                             // harita.jpg zaten önceden düzeltildiği için burada az yeterli.
-                                             // Boya HALA sızıyorsa bu sayıyı büyüt (3, 4...).
-                                             // Boya çok küçük kalıyorsa / hiç boyamıyorsa bu sayıyı küçült (1, 0).
+        var HARITA_BOYUTU = 3072;
+        var PARLAKLIK_ESIGI = 170;
+        var BOYA_YOGUNLUGU = 0.75;
+        var MAX_PIKSEL = 150000;
+        var SINIR_GENISLETME = 1;           // harita.jpg zaten önceden düzeltildiği için burada az yeterli.
 
         var YAZI_MIN_BOYUT = 10;
         var YAZI_MAX_BOYUT = 90;
@@ -52,7 +47,11 @@
         var YAZI_GENISLIK_PAYI = 0.85;
         var FRAKSIYON_ORANI = 0.55;
 
-        var tabloLinki = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS2-GK0VTqd-f9n3oWUJFkdSV-NW2l3yXd2ZPJQOPWI3hZac7I86_V_tfGfhUYORCrLscA66gz0TRnN/pub?output=csv';
+        var KONUM_YAZI_BOYUTU = 24;         // Locations (Safe Area, Outpost vb.) etiketlerinin sabit yazı boyutu (px)
+        var KONUM_NOKTA_YARICAPI = 6;        // Konum noktasının yuvarlak işaretinin yarıçapı (px)
+
+        var tabloLinkiIttifak = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS2-GK0VTqd-f9n3oWUJFkdSV-NW2l3yXd2ZPJQOPWI3hZac7I86_V_tfGfhUYORCrLscA66gz0TRnN/pub?gid=0&single=true&output=csv';
+        var tabloLinkiKonumlar = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS2-GK0VTqd-f9n3oWUJFkdSV-NW2l3yXd2ZPJQOPWI3hZac7I86_V_tfGfhUYORCrLscA66gz0TRnN/pub?gid=1495754258&single=true&output=csv';
 
         // ============================================================
         // HARİTA KURULUMU
@@ -65,15 +64,27 @@
         var sahiplikHaritasi = null;
 
         var baseImg = new Image();
-        var csvData = null;
+        var ittifakVerisi = null;
+        var konumVerisi = null;
 
-        function ikisiDeHazirMi() {
-            return baseImg.complete && baseImg.naturalWidth > 0 && csvData !== null;
+        function getVal(satir, keys) {
+            for (var k of keys) {
+                for (var col in satir) {
+                    if (col.trim().toLowerCase() === k.toLowerCase()) {
+                        return satir[col] ? satir[col].trim() : '';
+                    }
+                }
+            }
+            return '';
+        }
+
+        function hepsiHazirMi() {
+            return baseImg.complete && baseImg.naturalWidth > 0 && ittifakVerisi !== null && konumVerisi !== null;
         }
 
         var baslatildi = false;
         function denemeBasla() {
-            if (baslatildi || !ikisiDeHazirMi()) return;
+            if (baslatildi || !hepsiHazirMi()) return;
             baslatildi = true;
             haritayiOlustur();
         }
@@ -84,18 +95,30 @@
         };
         baseImg.src = 'harita.jpg';
 
-        Papa.parse(tabloLinki, {
-            download: true,
-            header: true,
-            skipEmptyLines: true,
+        Papa.parse(tabloLinkiIttifak, {
+            download: true, header: true, skipEmptyLines: true,
             complete: function(results) {
-                console.log("Tablodan Çekilen Ham Veri:", results.data);
-                csvData = results.data;
+                console.log("İttifak verisi:", results.data);
+                ittifakVerisi = results.data;
                 denemeBasla();
             },
             error: function(err) {
-                console.error("CSV okunamadı:", err);
-                alert("Google Sheets tablosu okunamadı. Linkin 'Publish to web -> CSV' olarak paylaşıldığından emin ol.");
+                console.error("İttifak CSV okunamadı:", err);
+                alert("İttifak tablosu okunamadı. Linkin 'Publish to web -> CSV' olarak paylaşıldığından emin ol.");
+            }
+        });
+
+        Papa.parse(tabloLinkiKonumlar, {
+            download: true, header: true, skipEmptyLines: true,
+            complete: function(results) {
+                console.log("Konum verisi:", results.data);
+                konumVerisi = results.data;
+                denemeBasla();
+            },
+            error: function(err) {
+                console.error("Konum CSV okunamadı:", err);
+                konumVerisi = []; // konum tablosu olmasa bile harita çalışmaya devam etsin
+                denemeBasla();
             }
         });
 
@@ -112,8 +135,7 @@
         }
 
         // ============================================================
-        // YENİ: SINIR MASKESİ OLUŞTURMA + GENİŞLETME (dilation)
-        // Küçük kopuklukları kapatmak için sınır çizgilerini yapay olarak kalınlaştırıyoruz.
+        // SINIR MASKESİ OLUŞTURMA + GENİŞLETME
         // ============================================================
         function sinirMaskesiOlustur(pixels, boyut) {
             var maske = new Uint8Array(boyut * boyut);
@@ -127,8 +149,6 @@
 
         function maskeGenislet(maske, boyut, yaricap) {
             if (yaricap <= 0) return maske;
-
-            // yatay geçiş
             var gecici = new Uint8Array(boyut * boyut);
             for (var y = 0; y < boyut; y++) {
                 var satirBaslangic = y * boyut;
@@ -142,8 +162,6 @@
                     gecici[satirBaslangic + x] = v;
                 }
             }
-
-            // dikey geçiş
             var sonuc = new Uint8Array(boyut * boyut);
             for (var x = 0; x < boyut; x++) {
                 for (var y = 0; y < boyut; y++) {
@@ -160,7 +178,7 @@
         }
 
         // ============================================================
-        // BOYA KOVASI (flood fill) — artık genişletilmiş sınır maskesine bakıyor
+        // BOYA KOVASI (flood fill)
         // ============================================================
         function bolgeyiDoldur(pixels, sinirMaskesi, sahiplik, boyut, baslangicX, baslangicY, rgb, sahipIndex, istatistik) {
             var ziyaretEdildi = new Uint8Array(boyut * boyut);
@@ -176,8 +194,8 @@
                 if (ziyaretEdildi[idx1D]) continue;
                 ziyaretEdildi[idx1D] = 1;
 
-                if (sahiplik[idx1D] !== -1) continue;   // başka bir ittifağa ait, dur
-                if (sinirMaskesi[idx1D]) continue;      // genişletilmiş sınır çizgisi, dur
+                if (sahiplik[idx1D] !== -1) continue;
+                if (sinirMaskesi[idx1D]) continue;
 
                 var idxPixel = idx1D * 4;
                 var r = pixels[idxPixel], g = pixels[idxPixel + 1], b = pixels[idxPixel + 2];
@@ -203,9 +221,9 @@
             }
 
             if (sayac === 0) {
-                console.warn("UYARI: (" + baslangicX + "," + baslangicY + ") noktası tam sınır çizgisinin üstüne denk geldi, hiç boyanmadı. Koordinatı 5-10 piksel içeri al.");
+                console.warn("UYARI: (" + baslangicX + "," + baslangicY + ") noktası tam sınır çizgisinin üstüne denk geldi, hiç boyanmadı.");
             } else if (sayac >= MAX_PIKSEL) {
-                console.warn("UYARI: (" + baslangicX + "," + baslangicY + ") noktasındaki boyama güvenlik limitine ulaştı (" + MAX_PIKSEL + " piksel). SINIR_GENISLETME değerini büyütmeyi dene.");
+                console.warn("UYARI: (" + baslangicX + "," + baslangicY + ") noktasındaki boyama güvenlik limitine ulaştı.");
             }
         }
 
@@ -239,12 +257,10 @@
             ctx.strokeStyle = 'rgba(0,0,0,0.95)';
             ctx.stroke();
             ctx.restore();
-
-            return bezGenisligi;
         }
 
         // ============================================================
-        // ETİKET ÇİZİMİ
+        // İttifak etiketi çizimi (Faction üstte, bayrak + isim altta)
         // ============================================================
         function etiketCiz(ctx, allianceAdi, faction, istatistik) {
             if (istatistik.sayim <= 0) return;
@@ -328,6 +344,35 @@
         }
 
         // ============================================================
+        // Konum etiketi çizimi (Safe Area, Outpost vb. - sabit boyutlu, nötr)
+        // ============================================================
+        function konumEtiketiCiz(ctx, isim, seviye, x, y) {
+            var metin = isim + (seviye ? ' (Lv.' + seviye + ')' : '');
+
+            ctx.save();
+            // küçük yuvarlak nokta işareti
+            ctx.beginPath();
+            ctx.arc(x, y, KONUM_NOKTA_YARICAPI, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+            ctx.stroke();
+
+            // isim + seviye yazısı, noktanın hemen altında
+            ctx.font = 'bold ' + KONUM_YAZI_BOYUTU + 'px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.lineWidth = Math.max(2, KONUM_YAZI_BOYUTU * 0.14);
+            ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+            ctx.fillStyle = '#ffffff';
+            var yaziY = y + KONUM_NOKTA_YARICAPI + 4;
+            ctx.strokeText(metin, x, yaziY);
+            ctx.fillText(metin, x, yaziY);
+            ctx.restore();
+        }
+
+        // ============================================================
         // ANA İŞLEM
         // ============================================================
         function haritayiOlustur() {
@@ -340,30 +385,18 @@
             var imgData = ctx.getImageData(0, 0, HARITA_BOYUTU, HARITA_BOYUTU);
             var pixels = imgData.data;
 
-            // 1) Sınır maskesini çıkar ve genişlet (kopuklukları kapat)
             var sinirMaskesi = sinirMaskesiOlustur(pixels, HARITA_BOYUTU);
             sinirMaskesi = maskeGenislet(sinirMaskesi, HARITA_BOYUTU, SINIR_GENISLETME);
 
             sahiplikHaritasi = new Int32Array(HARITA_BOYUTU * HARITA_BOYUTU).fill(-1);
 
-            csvData.forEach(function(satir, index) {
-                function getVal(keys) {
-                    for (var k of keys) {
-                        for (var col in satir) {
-                            if (col.trim().toLowerCase() === k.toLowerCase()) {
-                                return satir[col] ? satir[col].trim() : '';
-                            }
-                        }
-                    }
-                    return '';
-                }
-
-                var allianceAdi = getVal(['Alliance']);
-                var xVal = getVal(['X']);
-                var yVal = getVal(['Y']);
-                var renk = getVal(['Color']) || '#e74c3c';
-                var faction = getVal(['Faction']);
-                var area = getVal(['Area']);
+            ittifakVerisi.forEach(function(satir) {
+                var allianceAdi = getVal(satir, ['Alliance']);
+                var xVal = getVal(satir, ['X']);
+                var yVal = getVal(satir, ['Y']);
+                var renk = getVal(satir, ['Color']) || '#e74c3c';
+                var faction = getVal(satir, ['Faction']);
+                var area = getVal(satir, ['Area']);
 
                 if (!allianceAdi || !xVal || !yVal) return;
 
@@ -395,8 +428,25 @@
 
             ctx.putImageData(imgData, 0, 0);
 
+            // İttifak etiketleri
             ittifakBilgileri.forEach(function(bilgi) {
                 etiketCiz(ctx, bilgi.alliance, bilgi.faction, bilgi.istatistik);
+            });
+
+            // Konum (Safe Area, Outpost vb.) etiketleri
+            konumVerisi.forEach(function(satir) {
+                var isim = getVal(satir, ['Name']);
+                var seviye = getVal(satir, ['Level']);
+                var xVal = getVal(satir, ['X']);
+                var yVal = getVal(satir, ['Y']);
+
+                if (!isim || !xVal || !yVal) return;
+                var x = Math.round(parseFloat(xVal));
+                var y = Math.round(parseFloat(yVal));
+                if (isNaN(x) || isNaN(y)) return;
+                if (x < 0 || x >= HARITA_BOYUTU || y < 0 || y >= HARITA_BOYUTU) return;
+
+                konumEtiketiCiz(ctx, isim, seviye, x, y);
             });
 
             var sonGorsel = canvas.toDataURL('image/png');

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Konum Ekleme Aracı</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background-color: #1a1a1a; font-family: Arial, sans-serif; }
+        #map { width: 100vw; height: 100vh; }
+        .panel {
+            position: absolute; top: 10px; right: 10px; z-index: 1000;
+            background: rgba(255, 255, 255, 0.97); padding: 14px; border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3); font-size: 13px; width: 280px;
+            max-height: 90vh; display: flex; flex-direction: column;
+        }
+        .panel h4 { margin: 0 0 8px 0; }
+        #liste { overflow-y: auto; max-height: 45vh; margin: 8px 0; border-top: 1px solid #ddd; padding-top: 6px; }
+        .satir { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; border-bottom: 1px solid #eee; }
+        .satir button { background: #e74c3c; color: #fff; border: none; border-radius: 4px; padding: 2px 6px; cursor: pointer; font-size: 11px; }
+        #kopyalaBtn { background: #27ae60; color: #fff; border: none; border-radius: 6px; padding: 10px; font-size: 14px; cursor: pointer; width: 100%; margin-top: 6px; }
+        #kopyalaBtn:hover { background: #219150; }
+        #sayac { font-weight: bold; }
+        .ipucu { font-size: 11px; color: #666; margin-top: 8px; line-height: 1.4; }
+        .cdivicon { background: #27ae60; width: 16px; height: 16px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.7); }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="panel">
+        <h4>📍 Konum Ekleme Aracı</h4>
+        <div>Haritaya tıkla, isim ve seviye gir. Bittiğinde aşağıdaki butonla hepsini kopyala.</div>
+        <div>Eklenen: <span id="sayac">0</span></div>
+        <div id="liste"></div>
+        <button id="kopyalaBtn">📋 Hepsini Kopyala (Google Sheets'e yapıştır)</button>
+        <div class="ipucu">
+            Kopyaladıktan sonra Google Sheets'te "Locations" sayfasında boş bir satırın <b>Name</b> sütununa tıkla ve <b>Ctrl+V</b> (yapıştır) yap — Name, Level, X, Y sütunlarına otomatik dağılır.
+        </div>
+    </div>
+
+    <script>
+        var HARITA_BOYUTU = 3072;
+        var map = L.map('map', { crs: L.CRS.Simple, minZoom: -3, maxZoom: 3 });
+        var bounds = [[0, 0], [HARITA_BOYUTU, HARITA_BOYUTU]];
+        L.imageOverlay('harita.jpg', bounds).addTo(map);
+        map.fitBounds(bounds);
+
+        var eklenenler = [];
+        var markerlar = [];
+
+        function listeyiGuncelle() {
+            var liste = document.getElementById('liste');
+            liste.innerHTML = '';
+            eklenenler.forEach(function(item, i) {
+                var satir = document.createElement('div');
+                satir.className = 'satir';
+                satir.innerHTML = '<span>' + item.name + ' (Lv.' + item.level + ')</span>';
+                var silBtn = document.createElement('button');
+                silBtn.textContent = 'Sil';
+                silBtn.onclick = function() {
+                    eklenenler.splice(i, 1);
+                    map.removeLayer(markerlar[i]);
+                    markerlar.splice(i, 1);
+                    listeyiGuncelle();
+                };
+                satir.appendChild(silBtn);
+                liste.appendChild(satir);
+            });
+            document.getElementById('sayac').textContent = eklenenler.length;
+        }
+
+        map.on('click', function(e) {
+            var x = Math.round(e.latlng.lng);
+            var y = Math.round(HARITA_BOYUTU - e.latlng.lat);
+
+            var isim = prompt('Bu noktanın adı ne? (örn: Safe Area 12)');
+            if (!isim) return; // iptal edildi
+
+            var seviye = prompt('Seviyesi kaç? (örn: 1)');
+            if (seviye === null) return;
+
+            eklenenler.push({ name: isim.trim(), level: seviye.trim(), x: x, y: y });
+
+            var icon = L.divIcon({ className: 'cdivicon', iconSize: [16, 16] });
+            var m = L.marker(e.latlng, { icon: icon }).addTo(map);
+            m.bindTooltip(isim + ' (Lv.' + seviye + ')', { permanent: false, direction: 'top' });
+            markerlar.push(m);
+
+            listeyiGuncelle();
+        });
+
+        document.getElementById('kopyalaBtn').addEventListener('click', function() {
+            if (eklenenler.length === 0) {
+                alert('Henüz hiçbir nokta eklemedin.');
+                return;
+            }
+            var metin = eklenenler.map(function(it) {
+                return it.name + '\t' + it.level + '\t' + it.x + '\t' + it.y;
+            }).join('\n');
+
+            navigator.clipboard.writeText(metin).then(function() {
+                alert(eklenenler.length + ' konum panoya kopyalandı!\nŞimdi Google Sheets\'e (Locations sayfası, Name sütunu) yapıştır (Ctrl+V).');
+            }, function() {
+                // Kopyalama izni verilmezse, elle kopyalanabilecek bir kutu göster
+                prompt('Otomatik kopyalama başarısız oldu. Aşağıdaki metni elle seçip kopyala (Ctrl+C):', metin);
+            });
+        });
+    </script>
+</body>
+</html>
