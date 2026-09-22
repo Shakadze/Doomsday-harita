@@ -44,7 +44,7 @@
         var YAZI_MAX_BOYUT = 90;            // En büyük ittifak adı yazı boyutu (px).
         var YAZI_TABAN_ORANI = 0.28;        // Bölge büyüklüğüne göre taban yazı boyutu çarpanı (ince ayar için).
         var YAZI_GENISLIK_PAYI = 0.85;      // Yazı bloğu, bölge genişliğinin en fazla bu oranını kaplasın (taşmayı önler).
-        var FRAKSIYON_ORANI = 0.55;         // Fraksiyon yazısı, ittifak adı yazısının bu oranında (daha küçük) olsun.
+        var FRAKSIYON_ORANI = 0.55;         // Faction yazısı, Alliance adı yazısının bu oranında (daha küçük) olsun.
 
         var tabloLinki = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS2-GK0VTqd-f9n3oWUJFkdSV-NW2l3yXd2ZPJQOPWI3hZac7I86_V_tfGfhUYORCrLscA66gz0TRnN/pub?output=csv';
 
@@ -55,7 +55,7 @@
         var bounds = [[0, 0], [HARITA_BOYUTU, HARITA_BOYUTU]];
         map.fitBounds(bounds);
 
-        var ittifakBilgileri = [];   // index -> {ittifak, fraksiyon, popupHtml, istatistik}
+        var ittifakBilgileri = [];   // index -> {alliance, faction, popupHtml, istatistik}
         var sahiplikHaritasi = null; // Int32Array: her piksel hangi ittifağa ait (-1 = kimseye ait değil)
 
         var baseImg = new Image();
@@ -157,7 +157,6 @@
 
         // ============================================================
         // Her renkte görünür, elle çizilmiş küçük bayrak ikonu
-        // (x,y) = bayrak direğinin dikey ortası. boyut = referans yükseklik.
         // ============================================================
         function bayrakCiz(ctx, x, y, boyut) {
             var direkYuksekligi = boyut * 1.05;
@@ -168,7 +167,6 @@
             var altY = y + direkYuksekligi / 2;
 
             ctx.save();
-            // direk
             ctx.strokeStyle = 'rgba(0,0,0,0.9)';
             ctx.lineWidth = direkKalinligi;
             ctx.beginPath();
@@ -176,7 +174,6 @@
             ctx.lineTo(x, altY);
             ctx.stroke();
 
-            // bez (üçgen bayrak)
             ctx.beginPath();
             ctx.moveTo(x, ustY);
             ctx.lineTo(x + bezGenisligi, ustY + bezYuksekligi / 2);
@@ -189,14 +186,13 @@
             ctx.stroke();
             ctx.restore();
 
-            return bezGenisligi; // bayrağın kapladığı genişliği geri döndür (metni ona göre konumlandırmak için)
+            return bezGenisligi;
         }
 
         // ============================================================
-        // ETİKET ÇİZİMİ: üstte Fraksiyon (küçük), altta bayrak + tam ittifak adı
-        // İkisi de bölgenin ortasına, boyutuna göre ölçeklenerek çizilir.
+        // ETİKET ÇİZİMİ: üstte Faction (küçük), altta bayrak + tam Alliance adı
         // ============================================================
-        function etiketCiz(ctx, ittifak, fraksiyon, istatistik) {
+        function etiketCiz(ctx, allianceAdi, faction, istatistik) {
             if (istatistik.sayim <= 0) return;
 
             var merkezX = istatistik.toplamX / istatistik.sayim;
@@ -210,15 +206,14 @@
             var bayrakAlani = anaBoyut * 0.9;
             var araBosluk = anaBoyut * 0.18;
 
-            // Genişlik ölçümü (ilk deneme boyutlarıyla)
             ctx.font = 'bold ' + anaBoyut + 'px Arial';
-            var adGenisligi = ctx.measureText(ittifak).width;
+            var adGenisligi = ctx.measureText(allianceAdi).width;
             var ittifakSatiriGenislik = bayrakAlani + araBosluk + adGenisligi;
 
             var fraksiyonGenislik = 0;
-            if (fraksiyon) {
+            if (faction) {
                 ctx.font = fraksiyonBoyut + 'px Arial';
-                fraksiyonGenislik = ctx.measureText(fraksiyon).width;
+                fraksiyonGenislik = ctx.measureText(faction).width;
             }
 
             var enGenisSatir = Math.max(ittifakSatiriGenislik, fraksiyonGenislik);
@@ -233,13 +228,12 @@
             }
 
             anaBoyut = Math.max(YAZI_MIN_BOYUT, Math.min(YAZI_MAX_BOYUT, anaBoyut));
-            if (anaBoyut < YAZI_MIN_BOYUT + 0.5) return; // bölge çok küçük, etiket koyma
+            if (anaBoyut < YAZI_MIN_BOYUT + 0.5) return;
 
-            fraksiyonBoyut = Math.min(fraksiyonBoyut, anaBoyut); // fraksiyon hiçbir zaman ana isimden büyük olmasın
+            fraksiyonBoyut = Math.min(fraksiyonBoyut, anaBoyut);
 
-            // --- İki satırı dikeyde ortala ---
             var araGap = anaBoyut * 0.15;
-            var fraksiyonSatiriVarMi = !!fraksiyon;
+            var fraksiyonSatiriVarMi = !!faction;
             var blokYuksekligi = anaBoyut + (fraksiyonSatiriVarMi ? (fraksiyonBoyut + araGap) : 0);
             var ustSinir = merkezY - blokYuksekligi / 2;
 
@@ -251,20 +245,18 @@
             ctx.save();
             ctx.textBaseline = 'middle';
 
-            // Fraksiyon satırı (varsa) - ortalanmış, sade
             if (fraksiyonSatiriVarMi) {
                 ctx.font = 'bold ' + fraksiyonBoyut + 'px Arial';
                 ctx.textAlign = 'center';
                 ctx.lineWidth = Math.max(1.5, fraksiyonBoyut * 0.14);
                 ctx.strokeStyle = 'rgba(0,0,0,0.85)';
                 ctx.fillStyle = '#ffffff';
-                ctx.strokeText(fraksiyon, merkezX, fraksiyonY);
-                ctx.fillText(fraksiyon, merkezX, fraksiyonY);
+                ctx.strokeText(faction, merkezX, fraksiyonY);
+                ctx.fillText(faction, merkezX, fraksiyonY);
             }
 
-            // İttifak satırı: bayrak ikonu + tam isim, birlikte ortalanmış
             ctx.font = 'bold ' + anaBoyut + 'px Arial';
-            var adGenisligiSon = ctx.measureText(ittifak).width;
+            var adGenisligiSon = ctx.measureText(allianceAdi).width;
             var toplamGenislikSon = bayrakAlani + araBosluk + adGenisligiSon;
             var baslangicX = merkezX - toplamGenislikSon / 2;
 
@@ -275,14 +267,14 @@
             ctx.strokeStyle = 'rgba(0,0,0,0.85)';
             ctx.fillStyle = '#ffffff';
             var metinX = baslangicX + bayrakAlani + araBosluk;
-            ctx.strokeText(ittifak, metinX, ittifakY);
-            ctx.fillText(ittifak, metinX, ittifakY);
+            ctx.strokeText(allianceAdi, metinX, ittifakY);
+            ctx.fillText(allianceAdi, metinX, ittifakY);
 
             ctx.restore();
         }
 
         // ============================================================
-        // ANA İŞLEM: resmi canvas'a çiz, her ittifak için bölgeyi boya + etiket ekle
+        // ANA İŞLEM: resmi canvas'a çiz, her alliance için bölgeyi boya + etiket ekle
         // ============================================================
         function haritayiOlustur() {
             var canvas = document.createElement('canvas');
@@ -308,14 +300,15 @@
                     return '';
                 }
 
-                var ittifak = getVal(['Ittifak', 'Alliance', 'Tag', 'İttifak']);
-                var xVal = getVal(['X', 'Pos_X', 'X_Kordinat']);
-                var yVal = getVal(['Y', 'Pos_Y', 'Y_Kordinat']);
-                var renk = getVal(['Renk', 'Color']) || '#e74c3c';
-                var fraksiyon = getVal(['Fraksiyon', 'Server', 'Eyalet']);
-                var bolge = getVal(['Bolge', 'Region', 'Bölge', 'Kordinat_Kodu']);
+                // Sütun isimleri artık İngilizce: Alliance, Faction, Area, Color, X, Y
+                var allianceAdi = getVal(['Alliance']);
+                var xVal = getVal(['X']);
+                var yVal = getVal(['Y']);
+                var renk = getVal(['Color']) || '#e74c3c';
+                var faction = getVal(['Faction']);
+                var area = getVal(['Area']);
 
-                if (!ittifak || !xVal || !yVal) return;
+                if (!allianceAdi || !xVal || !yVal) return;
 
                 var x = Math.round(parseFloat(xVal));
                 var y = Math.round(parseFloat(yVal));
@@ -333,44 +326,21 @@
                 bolgeyiDoldur(pixels, sahiplikHaritasi, HARITA_BOYUTU, x, y, rgb, sahipIndex, istatistik);
 
                 // --- Popup içeriği (tıklayınca çıkacak bilgi kartı) ---
-                var oyuncuDetay = '';
-                var p1Ad = getVal(['Oyuncu1_Ad', 'En_Guclu_1', 'Highest Might']);
-                var p1Genel = getVal(['Oyuncu1_GenelGuc', 'Oyuncu1_Genel']);
-                var p1Gercek = getVal(['Oyuncu1_GercekGuc', 'Oyuncu1_Gercek']);
-                if (p1Ad || p1Genel || p1Gercek) {
-                    oyuncuDetay += `<b>1. ${p1Ad || 'Oyuncu'}</b><br>`;
-                    if (p1Genel) oyuncuDetay += `&nbsp;&nbsp;🛡️ Genel: <b>${p1Genel}</b> `;
-                    if (p1Gercek) oyuncuDetay += `⚔️ Gerçek: <b>${p1Gercek}</b>`;
-                    oyuncuDetay += `<br>`;
-                }
-                var p2Ad = getVal(['Oyuncu2_Ad', 'En_Guclu_2']);
-                var p2Genel = getVal(['Oyuncu2_GenelGuc', 'Oyuncu2_Genel']);
-                var p2Gercek = getVal(['Oyuncu2_GercekGuc', 'Oyuncu2_Gercek']);
-                if (p2Ad || p2Genel || p2Gercek) {
-                    oyuncuDetay += `<div style="margin-top:4px; border-top:1px solid #ddd; padding-top:4px;"><b>2. ${p2Ad || 'Oyuncu'}</b><br>`;
-                    if (p2Genel) oyuncuDetay += `&nbsp;&nbsp;🛡️ Genel: <b>${p2Genel}</b> `;
-                    if (p2Gercek) oyuncuDetay += `⚔️ Gerçek: <b>${p2Gercek}</b>`;
-                    oyuncuDetay += `</div>`;
-                }
-
                 var popupHtml = `
-                    <div style="font-family: sans-serif; min-width: 200px;">
-                        <h3 style="margin:0 0 6px 0; border-bottom:2px solid ${renk}; padding-bottom:4px; color:#2c3e50;">🚩 ${ittifak}</h3>
-                        ${fraksiyon ? `<b>🏳️ Fraksiyon/Eyalet:</b> ${fraksiyon}<br>` : ''}
-                        ${bolge ? `<b>📍 Bölge:</b> ${bolge}<br>` : ''}
-                        ${oyuncuDetay ? `<div style="margin-top:8px; font-size:12px; background:#f4f6f7; padding:6px; border-radius:4px;">${oyuncuDetay}</div>` : ''}
+                    <div style="font-family: sans-serif; min-width: 180px;">
+                        <h3 style="margin:0 0 6px 0; border-bottom:2px solid ${renk}; padding-bottom:4px; color:#2c3e50;">🚩 ${allianceAdi}</h3>
+                        ${faction ? `<b>Faction:</b> ${faction}<br>` : ''}
+                        ${area ? `<b>Area:</b> ${area}` : ''}
                     </div>
                 `;
 
-                ittifakBilgileri.push({ ittifak: ittifak, fraksiyon: fraksiyon, popupHtml: popupHtml, istatistik: istatistik });
+                ittifakBilgileri.push({ alliance: allianceAdi, faction: faction, popupHtml: popupHtml, istatistik: istatistik });
             });
 
-            // Boyanan pikselleri canvas'a geri yaz
             ctx.putImageData(imgData, 0, 0);
 
-            // Şimdi her bölgenin üstüne, boyutuna göre ölçeklenen fraksiyon + bayrak + isim etiketini çiz
             ittifakBilgileri.forEach(function(bilgi) {
-                etiketCiz(ctx, bilgi.ittifak, bilgi.fraksiyon, bilgi.istatistik);
+                etiketCiz(ctx, bilgi.alliance, bilgi.faction, bilgi.istatistik);
             });
 
             var sonGorsel = canvas.toDataURL('image/png');
