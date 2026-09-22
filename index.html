@@ -40,11 +40,17 @@
         var BOYA_YOGUNLUGU = 0.75;          // 0-1 arası. 1 = tamamen kaplayıcı renk, 0.5 = yarı saydam.
         var MAX_PIKSEL = 150000;            // Güvenlik limiti: bir bölge bu kadar pikselden fazla yayılırsa durur.
 
-        var YAZI_MIN_BOYUT = 10;            // En küçük ittifak adı yazı boyutu (px). Bundan küçükse etiket hiç çizilmez.
-        var YAZI_MAX_BOYUT = 90;            // En büyük ittifak adı yazı boyutu (px).
-        var YAZI_TABAN_ORANI = 0.28;        // Bölge büyüklüğüne göre taban yazı boyutu çarpanı (ince ayar için).
-        var YAZI_GENISLIK_PAYI = 0.85;      // Yazı bloğu, bölge genişliğinin en fazla bu oranını kaplasın (taşmayı önler).
-        var FRAKSIYON_ORANI = 0.55;         // Faction yazısı, Alliance adı yazısının bu oranında (daha küçük) olsun.
+        // YENİ: sızıntı önleme ayarı
+        var SINIR_GENISLETME = 1;           // Sınır çizgilerini bu kadar piksel kalınlaştır (küçük kopuklukları kapatır).
+                                             // harita.jpg zaten önceden düzeltildiği için burada az yeterli.
+                                             // Boya HALA sızıyorsa bu sayıyı büyüt (3, 4...).
+                                             // Boya çok küçük kalıyorsa / hiç boyamıyorsa bu sayıyı küçült (1, 0).
+
+        var YAZI_MIN_BOYUT = 10;
+        var YAZI_MAX_BOYUT = 90;
+        var YAZI_TABAN_ORANI = 0.28;
+        var YAZI_GENISLIK_PAYI = 0.85;
+        var FRAKSIYON_ORANI = 0.55;
 
         var tabloLinki = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS2-GK0VTqd-f9n3oWUJFkdSV-NW2l3yXd2ZPJQOPWI3hZac7I86_V_tfGfhUYORCrLscA66gz0TRnN/pub?output=csv';
 
@@ -55,8 +61,8 @@
         var bounds = [[0, 0], [HARITA_BOYUTU, HARITA_BOYUTU]];
         map.fitBounds(bounds);
 
-        var ittifakBilgileri = [];   // index -> {alliance, faction, popupHtml, istatistik}
-        var sahiplikHaritasi = null; // Int32Array: her piksel hangi ittifağa ait (-1 = kimseye ait değil)
+        var ittifakBilgileri = [];
+        var sahiplikHaritasi = null;
 
         var baseImg = new Image();
         var csvData = null;
@@ -94,7 +100,7 @@
         });
 
         // ============================================================
-        // RENK ÇÖZÜMLEME (hex ya da renk ismi -> {r,g,b})
+        // RENK ÇÖZÜMLEME
         // ============================================================
         function hexToRgb(renk) {
             var tmp = document.createElement('canvas').getContext('2d');
@@ -106,10 +112,57 @@
         }
 
         // ============================================================
-        // BOYA KOVASI (flood fill) ALGORİTMASI
-        // İstatistikleri (merkez noktası + kapladığı alan) de aynı anda topluyor
+        // YENİ: SINIR MASKESİ OLUŞTURMA + GENİŞLETME (dilation)
+        // Küçük kopuklukları kapatmak için sınır çizgilerini yapay olarak kalınlaştırıyoruz.
         // ============================================================
-        function bolgeyiDoldur(pixels, sahiplik, boyut, baslangicX, baslangicY, rgb, sahipIndex, istatistik) {
+        function sinirMaskesiOlustur(pixels, boyut) {
+            var maske = new Uint8Array(boyut * boyut);
+            for (var i = 0; i < boyut * boyut; i++) {
+                var p = i * 4;
+                var parlaklik = (pixels[p] + pixels[p + 1] + pixels[p + 2]) / 3;
+                maske[i] = parlaklik < PARLAKLIK_ESIGI ? 1 : 0;
+            }
+            return maske;
+        }
+
+        function maskeGenislet(maske, boyut, yaricap) {
+            if (yaricap <= 0) return maske;
+
+            // yatay geçiş
+            var gecici = new Uint8Array(boyut * boyut);
+            for (var y = 0; y < boyut; y++) {
+                var satirBaslangic = y * boyut;
+                for (var x = 0; x < boyut; x++) {
+                    var v = 0;
+                    var altSinir = Math.max(0, x - yaricap);
+                    var ustSinir = Math.min(boyut - 1, x + yaricap);
+                    for (var nx = altSinir; nx <= ustSinir; nx++) {
+                        if (maske[satirBaslangic + nx]) { v = 1; break; }
+                    }
+                    gecici[satirBaslangic + x] = v;
+                }
+            }
+
+            // dikey geçiş
+            var sonuc = new Uint8Array(boyut * boyut);
+            for (var x = 0; x < boyut; x++) {
+                for (var y = 0; y < boyut; y++) {
+                    var v = 0;
+                    var altSinirY = Math.max(0, y - yaricap);
+                    var ustSinirY = Math.min(boyut - 1, y + yaricap);
+                    for (var ny = altSinirY; ny <= ustSinirY; ny++) {
+                        if (gecici[ny * boyut + x]) { v = 1; break; }
+                    }
+                    sonuc[y * boyut + x] = v;
+                }
+            }
+            return sonuc;
+        }
+
+        // ============================================================
+        // BOYA KOVASI (flood fill) — artık genişletilmiş sınır maskesine bakıyor
+        // ============================================================
+        function bolgeyiDoldur(pixels, sinirMaskesi, sahiplik, boyut, baslangicX, baslangicY, rgb, sahipIndex, istatistik) {
             var ziyaretEdildi = new Uint8Array(boyut * boyut);
             var yigin = [[baslangicX, baslangicY]];
             var sayac = 0;
@@ -123,12 +176,11 @@
                 if (ziyaretEdildi[idx1D]) continue;
                 ziyaretEdildi[idx1D] = 1;
 
-                if (sahiplik[idx1D] !== -1) continue; // başka bir ittifağa ait, dur
+                if (sahiplik[idx1D] !== -1) continue;   // başka bir ittifağa ait, dur
+                if (sinirMaskesi[idx1D]) continue;      // genişletilmiş sınır çizgisi, dur
 
                 var idxPixel = idx1D * 4;
                 var r = pixels[idxPixel], g = pixels[idxPixel + 1], b = pixels[idxPixel + 2];
-                var parlaklik = (r + g + b) / 3;
-                if (parlaklik < PARLAKLIK_ESIGI) continue; // koyu/sınır çizgisi, dur
 
                 pixels[idxPixel]     = Math.round(r * (1 - BOYA_YOGUNLUGU) + rgb.r * BOYA_YOGUNLUGU);
                 pixels[idxPixel + 1] = Math.round(g * (1 - BOYA_YOGUNLUGU) + rgb.g * BOYA_YOGUNLUGU);
@@ -150,13 +202,15 @@
                 yigin.push([px, py - 1]);
             }
 
-            if (sayac >= MAX_PIKSEL) {
-                console.warn("UYARI: (" + baslangicX + "," + baslangicY + ") noktasındaki boyama güvenlik limitine ulaştı (" + MAX_PIKSEL + " piksel). PARLAKLIK_ESIGI değerini küçültmeyi dene.");
+            if (sayac === 0) {
+                console.warn("UYARI: (" + baslangicX + "," + baslangicY + ") noktası tam sınır çizgisinin üstüne denk geldi, hiç boyanmadı. Koordinatı 5-10 piksel içeri al.");
+            } else if (sayac >= MAX_PIKSEL) {
+                console.warn("UYARI: (" + baslangicX + "," + baslangicY + ") noktasındaki boyama güvenlik limitine ulaştı (" + MAX_PIKSEL + " piksel). SINIR_GENISLETME değerini büyütmeyi dene.");
             }
         }
 
         // ============================================================
-        // Her renkte görünür, elle çizilmiş küçük bayrak ikonu
+        // Bayrak ikonu
         // ============================================================
         function bayrakCiz(ctx, x, y, boyut) {
             var direkYuksekligi = boyut * 1.05;
@@ -190,7 +244,7 @@
         }
 
         // ============================================================
-        // ETİKET ÇİZİMİ: üstte Faction (küçük), altta bayrak + tam Alliance adı
+        // ETİKET ÇİZİMİ
         // ============================================================
         function etiketCiz(ctx, allianceAdi, faction, istatistik) {
             if (istatistik.sayim <= 0) return;
@@ -274,7 +328,7 @@
         }
 
         // ============================================================
-        // ANA İŞLEM: resmi canvas'a çiz, her alliance için bölgeyi boya + etiket ekle
+        // ANA İŞLEM
         // ============================================================
         function haritayiOlustur() {
             var canvas = document.createElement('canvas');
@@ -285,6 +339,10 @@
 
             var imgData = ctx.getImageData(0, 0, HARITA_BOYUTU, HARITA_BOYUTU);
             var pixels = imgData.data;
+
+            // 1) Sınır maskesini çıkar ve genişlet (kopuklukları kapat)
+            var sinirMaskesi = sinirMaskesiOlustur(pixels, HARITA_BOYUTU);
+            sinirMaskesi = maskeGenislet(sinirMaskesi, HARITA_BOYUTU, SINIR_GENISLETME);
 
             sahiplikHaritasi = new Int32Array(HARITA_BOYUTU * HARITA_BOYUTU).fill(-1);
 
@@ -300,7 +358,6 @@
                     return '';
                 }
 
-                // Sütun isimleri artık İngilizce: Alliance, Faction, Area, Color, X, Y
                 var allianceAdi = getVal(['Alliance']);
                 var xVal = getVal(['X']);
                 var yVal = getVal(['Y']);
@@ -323,9 +380,8 @@
                     minX: HARITA_BOYUTU, maxX: 0, minY: HARITA_BOYUTU, maxY: 0
                 };
 
-                bolgeyiDoldur(pixels, sahiplikHaritasi, HARITA_BOYUTU, x, y, rgb, sahipIndex, istatistik);
+                bolgeyiDoldur(pixels, sinirMaskesi, sahiplikHaritasi, HARITA_BOYUTU, x, y, rgb, sahipIndex, istatistik);
 
-                // --- Popup içeriği (tıklayınca çıkacak bilgi kartı) ---
                 var popupHtml = `
                     <div style="font-family: sans-serif; min-width: 180px;">
                         <h3 style="margin:0 0 6px 0; border-bottom:2px solid ${renk}; padding-bottom:4px; color:#2c3e50;">🚩 ${allianceAdi}</h3>
@@ -350,7 +406,7 @@
         }
 
         // ============================================================
-        // TIKLAMA: renkli bölgeye tıklarsan bilgi, boş yere tıklarsan koordinat
+        // TIKLAMA
         // ============================================================
         map.on('click', function(e) {
             var tiklananX = Math.round(e.latlng.lng);
