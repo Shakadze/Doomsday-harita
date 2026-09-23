@@ -364,6 +364,18 @@
             // sınırına göre SABİT bir orana göre yerleştiriyoruz. Böylece aynı sırada yan yana
             // duran benzer boydaki bölgelerde yazılar aynı hizada duruyor (cetvel etkisi).
             var hizaY = istatistik.minY + (istatistik.maxY - istatistik.minY) * ETIKET_DIKEY_ORAN;
+
+            // GÜVENLİK: blok, bölgenin üst/alt sınırının dışına ASLA taşmasın.
+            // İnce yatay şeritlerde (üst/alt kenar bölgeleri) bu olmadan yazı beyaza taşıyordu.
+            var minMerkez = istatistik.minY + blokYuksekligi / 2;
+            var maxMerkez = istatistik.maxY - blokYuksekligi / 2;
+            if (minMerkez <= maxMerkez) {
+                hizaY = Math.max(minMerkez, Math.min(maxMerkez, hizaY));
+            } else {
+                // blok, bölgenin tüm yüksekliğinden bile büyük: ortaya sabitle
+                hizaY = (istatistik.minY + istatistik.maxY) / 2;
+            }
+
             var imlecY = hizaY - blokYuksekligi / 2;
 
             ctx.save();
