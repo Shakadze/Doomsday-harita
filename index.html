@@ -134,6 +134,38 @@
             return { r: veri[0], g: veri[1], b: veri[2] };
         }
 
+        // Aynı Faction yazan her satır, otomatik olarak AYNI rengi alır.
+        // Farklı Faction yazan satır otomatik olarak FARKLI bir renk alır.
+        // Elle renk girmeye gerek kalmaz: Faction hücresini değiştirmek rengi de değiştirir.
+        function fraksiyondanRenkUret(metin) {
+            var hash = 0;
+            for (var i = 0; i < metin.length; i++) {
+                hash = metin.charCodeAt(i) + ((hash << 5) - hash);
+                hash = hash & hash;
+            }
+            var hue = Math.abs(hash) % 360;
+            return hslToRgb(hue, 65, 50);
+        }
+
+        function hslToRgb(h, s, l) {
+            s /= 100; l /= 100;
+            var c = (1 - Math.abs(2 * l - 1)) * s;
+            var x = c * (1 - Math.abs((h / 60) % 2 - 1));
+            var m = l - c / 2;
+            var r, g, b;
+            if (h < 60)       { r = c; g = x; b = 0; }
+            else if (h < 120) { r = x; g = c; b = 0; }
+            else if (h < 180) { r = 0; g = c; b = x; }
+            else if (h < 240) { r = 0; g = x; b = c; }
+            else if (h < 300) { r = x; g = 0; b = c; }
+            else              { r = c; g = 0; b = x; }
+            return {
+                r: Math.round((r + m) * 255),
+                g: Math.round((g + m) * 255),
+                b: Math.round((b + m) * 255)
+            };
+        }
+
         // ============================================================
         // SINIR MASKESİ OLUŞTURMA + GENİŞLETME
         // ============================================================
@@ -418,9 +450,9 @@
                 var allianceAdi = getVal(satir, ['Alliance']);
                 var xVal = getVal(satir, ['X']);
                 var yVal = getVal(satir, ['Y']);
-                var renk = getVal(satir, ['Color']) || '#e74c3c';
                 var faction = getVal(satir, ['Faction']);
                 var area = getVal(satir, ['Area']);
+                var elleRenk = getVal(satir, ['Color']); // Faction boşsa yedek olarak kullanılır
 
                 if (!allianceAdi || !xVal || !yVal) return;
 
@@ -429,7 +461,10 @@
                 if (isNaN(x) || isNaN(y)) return;
                 if (x < 0 || x >= HARITA_BOYUTU || y < 0 || y >= HARITA_BOYUTU) return;
 
-                var rgb = hexToRgb(renk);
+                // Renk: Faction varsa ondan otomatik üretilir (aynı Faction = aynı renk).
+                // Faction boşsa, Color sütunundaki (varsa) elle girilen renk kullanılır.
+                var rgb = faction ? fraksiyondanRenkUret(faction) : hexToRgb(elleRenk || '#e74c3c');
+                var renk = 'rgb(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ')'; // popup'taki başlık çizgisi için
                 var sahipIndex = ittifakBilgileri.length;
 
                 var istatistik = {
