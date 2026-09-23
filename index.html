@@ -265,12 +265,32 @@
             ctx.restore();
         }
 
+        function yuvarlakKutuCiz(ctx, cx, cy, genislik, yukseklik, yaricap) {
+            var x = cx - genislik / 2;
+            var y = cy - yukseklik / 2;
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(x + yaricap, y);
+            ctx.lineTo(x + genislik - yaricap, y);
+            ctx.arcTo(x + genislik, y, x + genislik, y + yaricap, yaricap);
+            ctx.lineTo(x + genislik, y + yukseklik - yaricap);
+            ctx.arcTo(x + genislik, y + yukseklik, x + genislik - yaricap, y + yukseklik, yaricap);
+            ctx.lineTo(x + yaricap, y + yukseklik);
+            ctx.arcTo(x, y + yukseklik, x, y + yukseklik - yaricap, yaricap);
+            ctx.lineTo(x, y + yaricap);
+            ctx.arcTo(x, y, x + yaricap, y, yaricap);
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(0,0,0,0.38)';
+            ctx.fill();
+            ctx.restore();
+        }
+
         function duzMetinCiz(ctx, metin, x, y, boyut) {
             ctx.font = 'bold ' + boyut + 'px Arial';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.lineWidth = Math.max(1.5, boyut * 0.14);
-            ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+            ctx.lineWidth = Math.max(1, boyut * 0.07);
+            ctx.strokeStyle = 'rgba(0,0,0,0.75)';
             ctx.fillStyle = '#ffffff';
             ctx.strokeText(metin, x, y);
             ctx.fillText(metin, x, y);
@@ -342,6 +362,11 @@
 
             ctx.save();
 
+            // --- Arkaya, tüm bloğu kaplayan yarı saydam bir "chip" zemin çiz (okunabilirlik için) ---
+            var kutuGenislik = Math.min(genislik, enGenisSatir) + anaBoyut * 0.5;
+            var kutuYukseklik = blokYuksekligi + anaBoyut * 0.35;
+            yuvarlakKutuCiz(ctx, merkezX, merkezY, kutuGenislik, kutuYukseklik, Math.min(kutuYukseklik * 0.25, 14));
+
             if (fraksiyonVar) {
                 var fraksiyonY = imlecY + kucukBoyut / 2;
                 duzMetinCiz(ctx, faction, merkezX, fraksiyonY, kucukBoyut);
@@ -358,8 +383,8 @@
 
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
-            ctx.lineWidth = Math.max(2, anaBoyut * 0.12);
-            ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+            ctx.lineWidth = Math.max(1, anaBoyut * 0.07);
+            ctx.strokeStyle = 'rgba(0,0,0,0.75)';
             ctx.fillStyle = '#ffffff';
             var metinX = baslangicX + bayrakAlani + araBosluk;
             ctx.strokeText(allianceAdi, metinX, ittifakY);
@@ -390,12 +415,16 @@
             ctx.stroke();
 
             ctx.font = 'bold ' + KONUM_YAZI_BOYUTU + 'px Arial';
+            var metinGenisligi = ctx.measureText(metin).width;
+            var yaziY = y + KONUM_NOKTA_YARICAPI + 4;
+
+            yuvarlakKutuCiz(ctx, x, yaziY + KONUM_YAZI_BOYUTU / 2, metinGenisligi + KONUM_YAZI_BOYUTU * 0.6, KONUM_YAZI_BOYUTU + KONUM_YAZI_BOYUTU * 0.35, 10);
+
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
-            ctx.lineWidth = Math.max(2, KONUM_YAZI_BOYUTU * 0.14);
-            ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+            ctx.lineWidth = Math.max(1, KONUM_YAZI_BOYUTU * 0.07);
+            ctx.strokeStyle = 'rgba(0,0,0,0.75)';
             ctx.fillStyle = '#ffffff';
-            var yaziY = y + KONUM_NOKTA_YARICAPI + 4;
             ctx.strokeText(metin, x, yaziY);
             ctx.fillText(metin, x, yaziY);
             ctx.restore();
