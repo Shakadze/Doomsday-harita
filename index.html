@@ -420,6 +420,17 @@
             sahiplikHaritasi = new Int32Array(HARITA_BOYUTU * HARITA_BOYUTU).fill(-1);
             fraksiyonRenkleri = {};
 
+            // 0) Önce, her Faction grubunun "sahibini" bul: Code'u kendi Faction'ına EŞİT olan satır.
+            //    Bu, Sheet'teki satır SIRASINDAN tamamen bağımsız çalışır.
+            ittifakVerisi.forEach(function(satir) {
+                var kod = getVal(satir, ['Code']);
+                var faction0 = getVal(satir, ['Faction']);
+                var elleRenk0 = getVal(satir, ['Color']);
+                if (kod && faction0 && kod.toLowerCase() === faction0.toLowerCase()) {
+                    fraksiyonRenkleri[faction0] = hexToRgb(elleRenk0 || '#e74c3c');
+                }
+            });
+
             // 1) İttifak bölgelerini boya
             ittifakVerisi.forEach(function(satir) {
                 var allianceAdi = getVal(satir, ['Alliance']);
@@ -436,19 +447,10 @@
                 if (isNaN(x) || isNaN(y)) return;
                 if (x < 0 || x >= HARITA_BOYUTU || y < 0 || y >= HARITA_BOYUTU) return;
 
-                // Renk belirleme:
-                // - Faction doluysa: bu grup daha önce görüldüyse o grubun rengini kullan;
-                //   ilk kez görülüyorsa bu satırın Color'unu grubun rengi olarak kaydet.
-                // - Faction boşsa: doğrudan bu satırın kendi Color'unu kullan.
-                var rgb;
-                if (faction) {
-                    if (!fraksiyonRenkleri[faction]) {
-                        fraksiyonRenkleri[faction] = hexToRgb(elleRenk || '#e74c3c');
-                    }
-                    rgb = fraksiyonRenkleri[faction];
-                } else {
-                    rgb = hexToRgb(elleRenk || '#e74c3c');
-                }
+                // Renk: Faction'ın "sahibi" (Code === Faction olan satır) 0. adımda bulunup
+                // fraksiyonRenkleri'ne kaydedildi. Sahip bulunamadıysa (örn. Code sütunu boş
+                // bırakılmışsa) bu satırın kendi Color'una geri düşülür.
+                var rgb = (faction && fraksiyonRenkleri[faction]) ? fraksiyonRenkleri[faction] : hexToRgb(elleRenk || '#e74c3c');
                 var renk = 'rgb(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ')'; // popup'taki başlık çizgisi için
                 var sahipIndex = ittifakBilgileri.length;
 
