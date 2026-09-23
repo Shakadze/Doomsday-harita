@@ -39,16 +39,16 @@
         var PARLAKLIK_ESIGI = 170;
         var BOYA_YOGUNLUGU = 0.75;
         var MAX_PIKSEL = 150000;
-        var SINIR_GENISLETME = 1;           // harita.jpg zaten önceden düzeltildiği için burada az yeterli.
+        var SINIR_GENISLETME = 1;
 
-        var YAZI_MIN_BOYUT = 10;
+        var YAZI_MIN_BOYUT = 9;
         var YAZI_MAX_BOYUT = 90;
         var YAZI_TABAN_ORANI = 0.28;
         var YAZI_GENISLIK_PAYI = 0.85;
-        var FRAKSIYON_ORANI = 0.55;
+        var KUCUK_SATIR_ORANI = 0.55;       // Faction ve Safe Area satırları, ana isim satırının bu oranında (küçük).
 
-        var KONUM_YAZI_BOYUTU = 24;         // Locations (Safe Area, Outpost vb.) etiketlerinin sabit yazı boyutu (px)
-        var KONUM_NOKTA_YARICAPI = 6;        // Konum noktasının yuvarlak işaretinin yarıçapı (px)
+        var KONUM_YAZI_BOYUTU = 24;         // Sahipsiz (ittifaka ait olmayan) konum noktalarının sabit yazı boyutu
+        var KONUM_NOKTA_YARICAPI = 6;
 
         var tabloLinkiIttifak = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS2-GK0VTqd-f9n3oWUJFkdSV-NW2l3yXd2ZPJQOPWI3hZac7I86_V_tfGfhUYORCrLscA66gz0TRnN/pub?gid=0&single=true&output=csv';
         var tabloLinkiKonumlar = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS2-GK0VTqd-f9n3oWUJFkdSV-NW2l3yXd2ZPJQOPWI3hZac7I86_V_tfGfhUYORCrLscA66gz0TRnN/pub?gid=1495754258&single=true&output=csv';
@@ -117,7 +117,7 @@
             },
             error: function(err) {
                 console.error("Konum CSV okunamadı:", err);
-                konumVerisi = []; // konum tablosu olmasa bile harita çalışmaya devam etsin
+                konumVerisi = [];
                 denemeBasla();
             }
         });
@@ -259,10 +259,23 @@
             ctx.restore();
         }
 
+        function duzMetinCiz(ctx, metin, x, y, boyut) {
+            ctx.font = 'bold ' + boyut + 'px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.lineWidth = Math.max(1.5, boyut * 0.14);
+            ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+            ctx.fillStyle = '#ffffff';
+            ctx.strokeText(metin, x, y);
+            ctx.fillText(metin, x, y);
+        }
+
         // ============================================================
-        // İttifak etiketi çizimi (Faction üstte, bayrak + isim altta)
+        // BİRLEŞİK ETİKET ÇİZİMİ
+        // Sıra (varsa): [Faction] üstte küçük -> [bayrak + Alliance adı] ortada büyük -> [Safe Area (Lv.X)] altta küçük
+        // Üçü de TEK blok olarak ölçeklenip aynı bölgenin ortasında dikeyde ortalanır — üst üste binmeyi önler.
         // ============================================================
-        function etiketCiz(ctx, allianceAdi, faction, istatistik) {
+        function etiketCiz(ctx, allianceAdi, faction, konum, istatistik) {
             if (istatistik.sayim <= 0) return;
 
             var merkezX = istatistik.toplamX / istatistik.sayim;
@@ -270,61 +283,66 @@
             var genislik = istatistik.maxX - istatistik.minX;
             var alan = istatistik.sayim;
 
+            var konumMetni = konum ? (konum.isim + (konum.seviye ? ' (Lv.' + konum.seviye + ')' : '')) : '';
+
             var taban = Math.sqrt(alan) * YAZI_TABAN_ORANI;
             var anaBoyut = taban;
-            var fraksiyonBoyut = taban * FRAKSIYON_ORANI;
+            var kucukBoyut = taban * KUCUK_SATIR_ORANI; // faction ve konum satırları aynı küçük boyutu paylaşır
             var bayrakAlani = anaBoyut * 0.9;
             var araBosluk = anaBoyut * 0.18;
 
+            // --- Genişlik ölçümü (üç satırın en genişi neyse ona göre ölçek belirlenir) ---
             ctx.font = 'bold ' + anaBoyut + 'px Arial';
             var adGenisligi = ctx.measureText(allianceAdi).width;
-            var ittifakSatiriGenislik = bayrakAlani + araBosluk + adGenisligi;
+            var anaSatirGenislik = bayrakAlani + araBosluk + adGenisligi;
 
             var fraksiyonGenislik = 0;
             if (faction) {
-                ctx.font = fraksiyonBoyut + 'px Arial';
+                ctx.font = 'bold ' + kucukBoyut + 'px Arial';
                 fraksiyonGenislik = ctx.measureText(faction).width;
             }
 
-            var enGenisSatir = Math.max(ittifakSatiriGenislik, fraksiyonGenislik);
+            var konumGenislik = 0;
+            if (konumMetni) {
+                ctx.font = 'bold ' + kucukBoyut + 'px Arial';
+                konumGenislik = ctx.measureText(konumMetni).width;
+            }
+
+            var enGenisSatir = Math.max(anaSatirGenislik, fraksiyonGenislik, konumGenislik);
             var izinliGenislik = genislik * YAZI_GENISLIK_PAYI;
 
             if (enGenisSatir > izinliGenislik && enGenisSatir > 0) {
                 var olcek = izinliGenislik / enGenisSatir;
                 anaBoyut = anaBoyut * olcek;
-                fraksiyonBoyut = fraksiyonBoyut * olcek;
+                kucukBoyut = kucukBoyut * olcek;
                 bayrakAlani = anaBoyut * 0.9;
                 araBosluk = anaBoyut * 0.18;
             }
 
             anaBoyut = Math.max(YAZI_MIN_BOYUT, Math.min(YAZI_MAX_BOYUT, anaBoyut));
+            kucukBoyut = Math.min(kucukBoyut, anaBoyut);
             if (anaBoyut < YAZI_MIN_BOYUT + 0.5) return;
 
-            fraksiyonBoyut = Math.min(fraksiyonBoyut, anaBoyut);
-
+            // --- Dikey blok hesaplama: var olan satırlar üst üste değil, sırayla dizilir ---
             var araGap = anaBoyut * 0.15;
-            var fraksiyonSatiriVarMi = !!faction;
-            var blokYuksekligi = anaBoyut + (fraksiyonSatiriVarMi ? (fraksiyonBoyut + araGap) : 0);
-            var ustSinir = merkezY - blokYuksekligi / 2;
+            var fraksiyonVar = !!faction;
+            var konumVar = !!konumMetni;
 
-            var fraksiyonY = ustSinir + fraksiyonBoyut / 2;
-            var ittifakY = fraksiyonSatiriVarMi
-                ? ustSinir + fraksiyonBoyut + araGap + anaBoyut / 2
-                : merkezY;
+            var blokYuksekligi = anaBoyut
+                + (fraksiyonVar ? (kucukBoyut + araGap) : 0)
+                + (konumVar ? (kucukBoyut + araGap) : 0);
+
+            var imlecY = merkezY - blokYuksekligi / 2;
 
             ctx.save();
-            ctx.textBaseline = 'middle';
 
-            if (fraksiyonSatiriVarMi) {
-                ctx.font = 'bold ' + fraksiyonBoyut + 'px Arial';
-                ctx.textAlign = 'center';
-                ctx.lineWidth = Math.max(1.5, fraksiyonBoyut * 0.14);
-                ctx.strokeStyle = 'rgba(0,0,0,0.85)';
-                ctx.fillStyle = '#ffffff';
-                ctx.strokeText(faction, merkezX, fraksiyonY);
-                ctx.fillText(faction, merkezX, fraksiyonY);
+            if (fraksiyonVar) {
+                var fraksiyonY = imlecY + kucukBoyut / 2;
+                duzMetinCiz(ctx, faction, merkezX, fraksiyonY, kucukBoyut);
+                imlecY += kucukBoyut + araGap;
             }
 
+            var ittifakY = imlecY + anaBoyut / 2;
             ctx.font = 'bold ' + anaBoyut + 'px Arial';
             var adGenisligiSon = ctx.measureText(allianceAdi).width;
             var toplamGenislikSon = bayrakAlani + araBosluk + adGenisligiSon;
@@ -333,24 +351,30 @@
             bayrakCiz(ctx, baslangicX + bayrakAlani * 0.35, ittifakY, anaBoyut);
 
             ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
             ctx.lineWidth = Math.max(2, anaBoyut * 0.12);
             ctx.strokeStyle = 'rgba(0,0,0,0.85)';
             ctx.fillStyle = '#ffffff';
             var metinX = baslangicX + bayrakAlani + araBosluk;
             ctx.strokeText(allianceAdi, metinX, ittifakY);
             ctx.fillText(allianceAdi, metinX, ittifakY);
+            imlecY += anaBoyut + araGap;
+
+            if (konumVar) {
+                var konumY = imlecY + kucukBoyut / 2;
+                duzMetinCiz(ctx, konumMetni, merkezX, konumY, kucukBoyut);
+            }
 
             ctx.restore();
         }
 
         // ============================================================
-        // Konum etiketi çizimi (Safe Area, Outpost vb. - sabit boyutlu, nötr)
+        // Sahipsiz konum noktaları için sade etiket (ittifak bölgesine denk gelmeyenler)
         // ============================================================
         function konumEtiketiCiz(ctx, isim, seviye, x, y) {
             var metin = isim + (seviye ? ' (Lv.' + seviye + ')' : '');
 
             ctx.save();
-            // küçük yuvarlak nokta işareti
             ctx.beginPath();
             ctx.arc(x, y, KONUM_NOKTA_YARICAPI, 0, Math.PI * 2);
             ctx.fillStyle = '#ffffff';
@@ -359,7 +383,6 @@
             ctx.strokeStyle = 'rgba(0,0,0,0.9)';
             ctx.stroke();
 
-            // isim + seviye yazısı, noktanın hemen altında
             ctx.font = 'bold ' + KONUM_YAZI_BOYUTU + 'px Arial';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
@@ -390,6 +413,7 @@
 
             sahiplikHaritasi = new Int32Array(HARITA_BOYUTU * HARITA_BOYUTU).fill(-1);
 
+            // 1) İttifak bölgelerini boya
             ittifakVerisi.forEach(function(satir) {
                 var allianceAdi = getVal(satir, ['Alliance']);
                 var xVal = getVal(satir, ['X']);
@@ -423,17 +447,12 @@
                     </div>
                 `;
 
-                ittifakBilgileri.push({ alliance: allianceAdi, faction: faction, popupHtml: popupHtml, istatistik: istatistik });
+                ittifakBilgileri.push({ alliance: allianceAdi, faction: faction, konum: null, popupHtml: popupHtml, istatistik: istatistik });
             });
 
-            ctx.putImageData(imgData, 0, 0);
-
-            // İttifak etiketleri
-            ittifakBilgileri.forEach(function(bilgi) {
-                etiketCiz(ctx, bilgi.alliance, bilgi.faction, bilgi.istatistik);
-            });
-
-            // Konum (Safe Area, Outpost vb.) etiketleri
+            // 2) Konum noktalarını, boyanmış bölgelere göre eşleştir
+            //    (bir Safe Area noktası, bir ittifağın boyadığı pikselin üstündeyse, o ittifağın etiketine eklenir)
+            var konumStandalone = [];
             konumVerisi.forEach(function(satir) {
                 var isim = getVal(satir, ['Name']);
                 var seviye = getVal(satir, ['Level']);
@@ -446,7 +465,29 @@
                 if (isNaN(x) || isNaN(y)) return;
                 if (x < 0 || x >= HARITA_BOYUTU || y < 0 || y >= HARITA_BOYUTU) return;
 
-                konumEtiketiCiz(ctx, isim, seviye, x, y);
+                var idx1D = y * HARITA_BOYUTU + x;
+                var sahipIndex = sahiplikHaritasi[idx1D];
+
+                if (sahipIndex !== -1 && ittifakBilgileri[sahipIndex] && !ittifakBilgileri[sahipIndex].konum) {
+                    ittifakBilgileri[sahipIndex].konum = { isim: isim, seviye: seviye };
+                } else if (sahipIndex !== -1 && ittifakBilgileri[sahipIndex] && ittifakBilgileri[sahipIndex].konum) {
+                    // bu bölgeye zaten bir konum atanmış, ikinciyi ayrı (sahipsizmiş gibi) çiz
+                    konumStandalone.push({ isim: isim, seviye: seviye, x: x, y: y });
+                } else {
+                    konumStandalone.push({ isim: isim, seviye: seviye, x: x, y: y });
+                }
+            });
+
+            ctx.putImageData(imgData, 0, 0);
+
+            // 3) Birleşik ittifak etiketlerini çiz (Faction + bayrak/isim + varsa Safe Area)
+            ittifakBilgileri.forEach(function(bilgi) {
+                etiketCiz(ctx, bilgi.alliance, bilgi.faction, bilgi.konum, bilgi.istatistik);
+            });
+
+            // 4) Sahipsiz kalan konum noktalarını sade şekilde çiz
+            konumStandalone.forEach(function(k) {
+                konumEtiketiCiz(ctx, k.isim, k.seviye, k.x, k.y);
             });
 
             var sonGorsel = canvas.toDataURL('image/png');
