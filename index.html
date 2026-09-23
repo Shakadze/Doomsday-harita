@@ -46,6 +46,8 @@
         var YAZI_TABAN_ORANI = 0.28;
         var YAZI_GENISLIK_PAYI = 0.85;
         var KUCUK_SATIR_ORANI = 0.55;       // Faction ve Safe Area satırları, ana isim satırının bu oranında (küçük).
+        var ETIKET_DIKEY_ORAN = 0.32;       // Etiketin dikey konumu: bölgenin üst sınırından itibaren bu oranda (0=en üst, 1=en alt).
+                                             // Aynı sırada yan yana duran bölgelerde yazıların aynı hizada durmasını sağlar.
 
         var KONUM_YAZI_BOYUTU = 24;         // Sahipsiz (ittifaka ait olmayan) konum noktalarının sabit yazı boyutu
         var KONUM_NOKTA_YARICAPI = 6;
@@ -358,14 +360,13 @@
                 + (fraksiyonVar ? (kucukBoyut + araGap) : 0)
                 + (konumVar ? (kucukBoyut + araGap) : 0);
 
-            var imlecY = merkezY - blokYuksekligi / 2;
+            // Dikey konum: her bölge şeklinin ortasına (centroid) göre DEĞİL, bölgenin üst/alt
+            // sınırına göre SABİT bir orana göre yerleştiriyoruz. Böylece aynı sırada yan yana
+            // duran benzer boydaki bölgelerde yazılar aynı hizada duruyor (cetvel etkisi).
+            var hizaY = istatistik.minY + (istatistik.maxY - istatistik.minY) * ETIKET_DIKEY_ORAN;
+            var imlecY = hizaY - blokYuksekligi / 2;
 
             ctx.save();
-
-            // --- Arkaya, tüm bloğu kaplayan yarı saydam bir "chip" zemin çiz (okunabilirlik için) ---
-            var kutuGenislik = Math.min(genislik, enGenisSatir) + anaBoyut * 0.5;
-            var kutuYukseklik = blokYuksekligi + anaBoyut * 0.35;
-            yuvarlakKutuCiz(ctx, merkezX, merkezY, kutuGenislik, kutuYukseklik, Math.min(kutuYukseklik * 0.25, 14));
 
             if (fraksiyonVar) {
                 var fraksiyonY = imlecY + kucukBoyut / 2;
@@ -415,10 +416,7 @@
             ctx.stroke();
 
             ctx.font = 'bold ' + KONUM_YAZI_BOYUTU + 'px Arial';
-            var metinGenisligi = ctx.measureText(metin).width;
             var yaziY = y + KONUM_NOKTA_YARICAPI + 4;
-
-            yuvarlakKutuCiz(ctx, x, yaziY + KONUM_YAZI_BOYUTU / 2, metinGenisligi + KONUM_YAZI_BOYUTU * 0.6, KONUM_YAZI_BOYUTU + KONUM_YAZI_BOYUTU * 0.35, 10);
 
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
