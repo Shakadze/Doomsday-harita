@@ -51,11 +51,9 @@
             white-space: nowrap;
             pointer-events: none;
         }
-        .konum-nokta {
-            width: 10px; height: 10px; border-radius: 50%;
-            background: #fff; border: 2px solid rgba(0,0,0,0.9);
-            margin: 0 auto 2px auto;
-        }
+        .konum-ikon-sarici { position: relative; width: 28px; height: 28px; margin: 0 auto 2px auto; }
+        .konum-ikon-sarici svg.ana { position: absolute; top: 0; left: 0; width: 100%; height: 100%; filter: drop-shadow(0 0 2px rgba(0,0,0,0.8)); }
+        .konum-ikon-sarici svg.kalkan { position: absolute; top: -5px; right: -7px; width: 15px; height: 15px; filter: drop-shadow(0 0 1.5px rgba(0,0,0,0.9)); }
     </style>
 </head>
 <body>
@@ -252,6 +250,32 @@
         }
 
         // ============================================================
+        // Konum ikonları: Safe Area -> ev, diğerleri -> karargah (kale).
+        // Status "Open"/"Açık" değilse üstüne kalkan rozeti eklenir (henüz açılmamış demek).
+        // ============================================================
+        var EV_SVG = '<svg class="ana" viewBox="0 0 24 24"><path d="M12 2 L22 11 H18.5 V21 H5.5 V11 H2 Z" fill="#ffffff" stroke="#000000" stroke-width="1.6"/></svg>';
+        var KARARGAH_SVG = '<svg class="ana" viewBox="0 0 24 24">' +
+            '<rect x="3" y="10" width="18" height="11" fill="#ffffff" stroke="#000000" stroke-width="1.6"/>' +
+            '<rect x="3" y="3.5" width="4" height="6.5" fill="#ffffff" stroke="#000000" stroke-width="1.6"/>' +
+            '<rect x="10" y="3.5" width="4" height="6.5" fill="#ffffff" stroke="#000000" stroke-width="1.6"/>' +
+            '<rect x="17" y="3.5" width="4" height="6.5" fill="#ffffff" stroke="#000000" stroke-width="1.6"/>' +
+            '</svg>';
+        var KALKAN_SVG = '<svg class="kalkan" viewBox="0 0 24 24"><path d="M12 2 L20 5 V11 C20 17 16 20.5 12 22 C8 20.5 4 17 4 11 V5 Z" fill="#8d99ae" stroke="#000000" stroke-width="1.6"/></svg>';
+
+        function isimSafeAreaMi(isim) {
+            return (isim || '').toLowerCase().indexOf('safe area') !== -1;
+        }
+        function durumAcikMi(durum) {
+            var d = (durum || '').toLowerCase();
+            return d.indexOf('open') !== -1 || d.indexOf('açık') !== -1 || d.indexOf('acik') !== -1;
+        }
+        function konumIkonHtml(isim, durum) {
+            var anaIkon = isimSafeAreaMi(isim) ? EV_SVG : KARARGAH_SVG;
+            var kalkanVar = !durumAcikMi(durum); // belirtilmemişse varsayılan: kapalı (kalkanlı)
+            return '<div class="konum-ikon-sarici">' + anaIkon + (kalkanVar ? KALKAN_SVG : '') + '</div>';
+        }
+
+        // ============================================================
         // ANA İŞLEM
         // ============================================================
         function haritayiOlustur() {
@@ -325,6 +349,7 @@
                 var seviye = getVal(satir, ['Level']);
                 var xVal = getVal(satir, ['X']);
                 var yVal = getVal(satir, ['Y']);
+                var durum = getVal(satir, ['Status', 'Durum']);
 
                 if (!isim || !xVal || !yVal) return;
                 var x = Math.round(parseFloat(xVal));
@@ -336,9 +361,9 @@
                 var sahipIndex = sahiplikHaritasi[idx1D];
 
                 if (sahipIndex !== -1 && ittifakBilgileri[sahipIndex] && !ittifakBilgileri[sahipIndex].konum) {
-                    ittifakBilgileri[sahipIndex].konum = { isim: isim, seviye: seviye };
+                    ittifakBilgileri[sahipIndex].konum = { isim: isim, seviye: seviye, durum: durum };
                 } else {
-                    konumStandalone.push({ isim: isim, seviye: seviye, x: x, y: y });
+                    konumStandalone.push({ isim: isim, seviye: seviye, x: x, y: y, durum: durum });
                 }
             });
 
@@ -378,7 +403,7 @@
                 var latlng = pikselToLatLng(k.x, k.y);
                 var metin = k.isim + (k.seviye ? ' (Lv.' + k.seviye + ')' : '');
                 var html = `<div class="konum-sarici">
-                    <div class="konum-nokta"></div>
+                    ${konumIkonHtml(k.isim, k.durum)}
                     <div class="metin-golge e-konum">${metin}</div>
                 </div>`;
                 var icon = L.divIcon({ html: html, className: '', iconSize: null });
