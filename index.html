@@ -25,6 +25,7 @@
         /* --- Etiketler: gerçek DOM elemanları, tarayıcı kendi ortalıyor --- */
         .etiket-sarici {
             transform: translate(-50%, -50%);
+            transform-origin: center center;
             pointer-events: auto;
             cursor: pointer;
             text-align: center;
@@ -47,6 +48,7 @@
 
         .konum-sarici {
             transform: translate(-50%, -50%);
+            transform-origin: center center;
             text-align: center;
             white-space: nowrap;
             pointer-events: none;
@@ -410,8 +412,31 @@
                 L.marker(latlng, { icon: icon, interactive: false }).addTo(map);
             });
 
+            etiketOlceklerinGuncelle();
+
             document.getElementById('yukleniyor').style.display = 'none';
         }
+
+        // ============================================================
+        // ZOOM'A GÖRE ETİKET ÖLÇEKLENDİRME
+        // Etiketler artık haritayla birlikte büyüyüp küçülüyor (bölgeler nasıl büyüyorsa aynı oranda).
+        // ============================================================
+        var REFERANS_ZOOM = 0; // Bu zoom seviyesinde etiketler "normal" (1x) boyutta olur.
+        var OLCEK_TABANI = 1.7; // Her zoom adımında etiketler bu kat büyür/küçülür. Büyütürsen fark daha belirgin olur.
+        var OLCEK_MIN = 0.35;
+        var OLCEK_MAX = 4;
+
+        function etiketOlceklerinGuncelle() {
+            var zoom = map.getZoom();
+            var faktor = Math.pow(OLCEK_TABANI, zoom - REFERANS_ZOOM);
+            faktor = Math.max(OLCEK_MIN, Math.min(OLCEK_MAX, faktor));
+            var donusum = 'translate(-50%, -50%) scale(' + faktor + ')';
+            document.querySelectorAll('.etiket-sarici, .konum-sarici').forEach(function(el) {
+                el.style.transform = donusum;
+            });
+        }
+
+        map.on('zoom', etiketOlceklerinGuncelle);
 
         // ============================================================
         // TIKLAMA (boş alanlar için koordinat okuma)
